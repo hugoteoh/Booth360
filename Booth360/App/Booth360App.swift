@@ -10,6 +10,7 @@ struct Booth360App: App {
     @State private var systemMonitor: SystemStatusMonitor
     @State private var remoteHub = RemoteControlHub()
     @State private var lanServer = LANControlServer()
+    @State private var turntable = TurntableService()
 
     init() {
         let storage = FileStorageService()
@@ -47,7 +48,8 @@ struct Booth360App: App {
                 uploadQueue: uploadQueue,
                 systemMonitor: systemMonitor,
                 remoteHub: remoteHub,
-                lanServer: lanServer
+                lanServer: lanServer,
+                turntable: turntable
             )
         }
         .modelContainer(container)

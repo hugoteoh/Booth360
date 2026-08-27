@@ -12,6 +12,7 @@ struct GuestModeView: View {
     @Environment(UploadQueue.self) private var uploadQueue
     @Environment(SystemStatusMonitor.self) private var monitor
     @Environment(RemoteControlHub.self) private var hub
+    @Environment(TurntableService.self) private var turntable
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: GuestFlowViewModel?
     @State private var showPINPad = false
@@ -81,7 +82,11 @@ struct GuestModeView: View {
         }
         .task {
             viewModel.hub = hub
+            viewModel.turntable = turntable
             viewModel.blockedProvider = { monitor.blocksNewRecording }
+            if event.turntableSpinEnabled {
+                turntable.reconnectRememberedIfNeeded()
+            }
             viewModel.onAppear(modelContext: modelContext)
         }
         .onDisappear { viewModel.teardown() }

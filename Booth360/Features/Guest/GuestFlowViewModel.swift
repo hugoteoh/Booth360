@@ -39,6 +39,8 @@ final class GuestFlowViewModel {
     @ObservationIgnored var blockedProvider: (() -> Bool)?
     /// 局域网控制桥（状态回写 + 远程开始）。
     @ObservationIgnored weak var hub: RemoteControlHub?
+    /// 转台蓝牙控制（活动开了开关且已连接时：录制开始转、结束停）。
+    @ObservationIgnored weak var turntable: TurntableService?
     @ObservationIgnored private var flowTask: Task<Void, Never>?
     @ObservationIgnored private var autoReturnTask: Task<Void, Never>?
     @ObservationIgnored private var loopObserver: NSObjectProtocol?
@@ -71,6 +73,7 @@ final class GuestFlowViewModel {
         processingEngine.cancel()
         cameraEngine.stopRecording()
         motionTrigger.stop()
+        turntable?.sendStop()
         cleanupResult()
         hub?.guestActive = false
         hub?.guestPhaseText = "未开启"
@@ -153,7 +156,10 @@ final class GuestFlowViewModel {
             }
         }
 
-        // 2. 录制（自动停止由引擎 maxRecordedDuration 保证）
+        // 2. 录制（自动停止由引擎 maxRecordedDuration 保证）；转台随录制起转
+        if event.turntableSpinEnabled {
+            turntable?.sendStart()
+        }
         let sourceURL = storage.newSourceClipURL()
         let totalSeconds = event.recordingSeconds
         phase = .recording(remaining: totalSeconds)
@@ -171,6 +177,7 @@ final class GuestFlowViewModel {
         do {
             let info = try await cameraEngine.startRecording(to: sourceURL, maxSeconds: totalSeconds)
             tickTask.cancel()
+            if event.turntableSpinEnabled { turntable?.sendStop() }
 
             // 3. 源片入库（先保住素材，处理失败也不丢）
             let clip = SourceClip(
@@ -231,6 +238,7 @@ final class GuestFlowViewModel {
             startAutoReturnCountdown()
         } catch {
             tickTask.cancel()
+            if event.turntableSpinEnabled { turntable?.sendStop() }
             if !clipSaved {
                 // 录制阶段就失败：清掉半成品文件
                 storage.deleteFileIfExists(at: sourceURL)

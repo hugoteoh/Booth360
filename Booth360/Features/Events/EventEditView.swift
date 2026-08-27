@@ -64,6 +64,7 @@ struct EventEditView: View {
                     }
                 }
                 Toggle("转台起转自动开拍", isOn: $event.motionTriggerEnabled)
+                Toggle("拍摄时蓝牙控制转台旋转", isOn: $event.turntableSpinEnabled)
             }
 
             Section("效果参数") {

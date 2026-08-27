@@ -5,6 +5,12 @@ struct AdminSettingsView: View {
     @Environment(SystemStatusMonitor.self) private var monitor
     @Environment(LANControlServer.self) private var lanServer
     @Environment(UploadQueue.self) private var uploadQueue
+    @Environment(TurntableService.self) private var turntable
+
+    private var turntableStateBrief: String {
+        if case .connected(let name) = turntable.state { return name }
+        return "未连接"
+    }
 
     @State private var pin = PINPadView.storedPIN
     @State private var uploadMode = UploadMode.current
@@ -86,6 +92,21 @@ struct AdminSettingsView: View {
                 } else if uploadMode == .mock {
                     Text("Mock 模式只在本机模拟上传流程（2 秒延时 + 假链接），用于无网/未配置时联调。")
                 }
+            }
+
+            Section {
+                NavigationLink {
+                    TurntableSettingsView()
+                } label: {
+                    LabeledContent("转台设备（蓝牙）") {
+                        Text(turntableStateBrief)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("360 转台")
+            } footer: {
+                Text("连接转台后，在活动设置里打开「拍摄时蓝牙控制转台旋转」，嘉宾点开始转台自动转、录完自动停。")
             }
 
             Section {

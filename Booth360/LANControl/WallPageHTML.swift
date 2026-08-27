@@ -20,14 +20,14 @@ enum WallPageHTML {
                background: radial-gradient(ellipse at center, #16121f 0%, #000 75%); }
       #player { max-width: 100%; max-height: 100vh; }
       #emptyHint { text-align: center; color: #666; font-size: 28px; line-height: 2; }
-      aside { width: 430px; background: #0d0d12; border-left: 1px solid #222;
+      aside { width: 430px; background: #131313; border-left: 1px solid #2c2c2c;
               display: flex; flex-direction: column; align-items: center;
               padding: 40px 28px; gap: 18px; }
       aside h1 { font-size: 30px; font-weight: 800; letter-spacing: 2px; }
       aside .sub { color: #888; font-size: 15px; }
-      #qrbox { width: 300px; height: 300px; background: #fff; border-radius: 20px;
+      #qrbox { width: 340px; height: 340px; background: #fff; border-radius: 8px;
                display: flex; align-items: center; justify-content: center; }
-      #qrbox img { width: 272px; height: 272px; image-rendering: pixelated; }
+      #qrbox img { width: 312px; height: 312px; image-rendering: pixelated; }
       #qrbox .waiting { color: #555; font-size: 17px; text-align: center; line-height: 1.8; }
       #meta { font-size: 18px; color: #aaa; }
       #list { width: 100%; flex: 1; overflow-y: auto; margin-top: 8px; }

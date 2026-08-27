@@ -30,6 +30,7 @@ targets:
         NSMicrophoneUsageDescription: Booth360 需要使用麦克风录制现场声音。
         NSPhotoLibraryAddUsageDescription: Booth360 需要把导出的成品视频保存到你的相册。
         NSLocalNetworkUsageDescription: Booth360 需要本地网络权限，以便同一 Wi-Fi 的电脑浏览器远程控制拍摄。
+        NSBluetoothAlwaysUsageDescription: Booth360 需要蓝牙权限来连接并控制 360 转台的旋转。
         NSBonjourServices:
           - _booth360._tcp
         UIFileSharingEnabled: true

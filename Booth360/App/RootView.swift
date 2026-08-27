@@ -10,6 +10,7 @@ struct RootView: View {
     let systemMonitor: SystemStatusMonitor
     let remoteHub: RemoteControlHub
     let lanServer: LANControlServer
+    let turntable: TurntableService
 
     @Environment(\.modelContext) private var modelContext
     @State private var guestEvent: EventTemplate?
@@ -35,6 +36,7 @@ struct RootView: View {
         .environment(systemMonitor)
         .environment(remoteHub)
         .environment(lanServer)
+        .environment(turntable)
         .preferredColorScheme(.dark)
         // 拍摄现场减少 Home 指示条干扰
         .persistentSystemOverlays(.hidden)

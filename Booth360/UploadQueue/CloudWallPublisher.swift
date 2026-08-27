@@ -34,16 +34,17 @@ enum CloudWallPublisher {
             // 每次发布对全部条目重新签名 + 重生成二维码：链接永远新鲜（各 7 天有效期从现在起算）
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
+            let brandName = AccountStore.load().studioName
             var jsonItems: [[String: Any]] = []
             for item in items {
                 let baseKey = "booth360/\(item.id.uuidString.lowercased())"
+                // 落地页与二维码用永久公开地址；页内视频链接每次发布续期 7 天
+                let pageURL = "https://\(config.host)/\(baseKey)/index.html"
+                let qrURL = "https://\(config.host)/\(baseKey)/qr.png"
                 guard let videoURL = COSSigner.signedURL(
                         config: config, objectKey: "\(baseKey)/\(item.fileName)",
                         method: "get", expiresSeconds: TencentCOSBackend.downloadExpirySeconds),
-                      let qrURL = COSSigner.signedURL(
-                        config: config, objectKey: "\(baseKey)/qr.png",
-                        method: "get", expiresSeconds: TencentCOSBackend.downloadExpirySeconds),
-                      let qrImage = QRCodeGenerator.image(for: videoURL.absoluteString, sidePixels: 480),
+                      let qrImage = QRCodeGenerator.image(for: pageURL, sidePixels: 480),
                       let qrPNG = qrImage.pngData() else { continue }
                 try await putPublicObject(
                     data: qrPNG,
@@ -51,11 +52,23 @@ enum CloudWallPublisher {
                     contentType: "image/png",
                     config: config
                 )
+                let landingHTML = DownloadPageHTML.html(
+                    videoURL: videoURL.absoluteString,
+                    title: "你的 360 视频",
+                    brandName: brandName
+                )
+                try await putPublicObject(
+                    data: Data(landingHTML.utf8),
+                    objectKey: "\(baseKey)/index.html",
+                    contentType: "text/html; charset=utf-8",
+                    config: config
+                )
                 jsonItems.append([
                     "id": item.id.uuidString,
                     "time": formatter.string(from: item.createdAt),
                     "url": videoURL.absoluteString,
-                    "qr": qrURL.absoluteString,
+                    "qr": qrURL,
+                    "page": pageURL,
                 ])
             }
             let manifest: [String: Any] = [
@@ -84,8 +97,8 @@ enum CloudWallPublisher {
         }
     }
 
-    /// 带 x-cos-acl: public-read 的 PUT（ACL 头已签名）。
-    private static func putPublicObject(
+    /// 带 x-cos-acl: public-read 的 PUT（ACL 头已签名）。TencentCOSBackend 发布落地页也用。
+    static func putPublicObject(
         data: Data,
         objectKey: String,
         contentType: String,

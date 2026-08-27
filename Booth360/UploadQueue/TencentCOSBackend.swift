@@ -160,12 +160,34 @@ struct TencentCOSBackend: UploadBackend {
                 body: String(data: data, encoding: .utf8) ?? ""
             )
         }
-        guard let downloadURL = COSSigner.signedURL(
+        guard let videoGET = COSSigner.signedURL(
             config: config, objectKey: objectKey, method: "get",
             expiresSeconds: Self.downloadExpirySeconds) else {
             throw UploadError.network("无法构造下载 URL")
         }
-        return downloadURL
+
+        // 生成扫码落地页（公开可读、地址永久）：二维码指向落地页而非裸视频文件。
+        // 页内视频链接 7 天有效；云端大屏每次发布会自动续期刷新该页。
+        let baseKey = objectKey.split(separator: "/").dropLast().joined(separator: "/")
+        let landingHTML = DownloadPageHTML.html(
+            videoURL: videoGET.absoluteString,
+            title: "你的 360 视频",
+            brandName: AccountStore.load().studioName
+        )
+        do {
+            try await CloudWallPublisher.putPublicObject(
+                data: Data(landingHTML.utf8),
+                objectKey: "\(baseKey)/index.html",
+                contentType: "text/html; charset=utf-8",
+                config: config
+            )
+            if let pageURL = URL(string: "https://\(config.host)/\(baseKey)/index.html") {
+                return pageURL
+            }
+        } catch {
+            AppLogger.storage.error("落地页发布失败，回退视频直链: \(error.localizedDescription, privacy: .public)")
+        }
+        return videoGET
     }
 }
 

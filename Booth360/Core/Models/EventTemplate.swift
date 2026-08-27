@@ -35,6 +35,8 @@ final class EventTemplate {
     var recordingSeconds: Int
     /// 转台起转自动开拍（Motion Trigger）。
     var motionTriggerEnabled: Bool = false
+    /// 拍摄时经蓝牙自动控制转台旋转（开始录制转、录完停）。
+    var turntableSpinEnabled: Bool = false
 
     /// EffectSettings 的 JSON（结构见 VideoProcessingEngine/EffectSettings.swift）。
     var effectSettingsData: Data

@@ -82,6 +82,23 @@ final class Phase4Tests: XCTestCase {
         XCTAssertNil(HTTPRequestParser.parse("NOTHTTP"))
     }
 
+    // MARK: - HexCommand（转台指令解析）
+
+    func testHexParsingVariants() {
+        XCTAssertEqual(HexCommand.parse("01"), Data([0x01]))
+        XCTAssertEqual(HexCommand.parse("A5 01 5A"), Data([0xA5, 0x01, 0x5A]))
+        XCTAssertEqual(HexCommand.parse("0xA5,0x01,0x5A"), Data([0xA5, 0x01, 0x5A]))
+        XCTAssertEqual(HexCommand.parse("a5-01-5a"), Data([0xA5, 0x01, 0x5A]))
+        XCTAssertEqual(HexCommand.parse("FFEE"), Data([0xFF, 0xEE]))
+    }
+
+    func testHexParsingRejectsInvalid() {
+        XCTAssertNil(HexCommand.parse(""))
+        XCTAssertNil(HexCommand.parse("XYZ"))
+        XCTAssertNil(HexCommand.parse("1"), "奇数位数字不合法")
+        XCTAssertNil(HexCommand.parse("0x1 0x2"), "单个半字节不合法")
+    }
+
     // MARK: - OperatorProfile
 
     func testOperatorProfileRoundTrip() {
