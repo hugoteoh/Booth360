@@ -114,14 +114,24 @@ final class GuestFlowViewModel {
         phase = .welcome
     }
 
-    /// 重拍：丢弃当前结果展示（文件与记录都保留），直接重新走流程。
+    /// 重拍：这条成品作废（记录+成品文件删除，不上大屏；源视频保留），直接重新走流程。
     func retakeTapped() {
         guard phase == .result else { return }
+        if let render = currentRender {
+            storage.deleteFileIfExists(at: storage.renderURL(fileName: render.fileName))
+            modelContext?.delete(render)
+            try? modelContext?.save()
+            AppLogger.ui.info("嘉宾重拍，作废成品 \(render.fileName, privacy: .public)")
+        }
         cleanupResult()
         flowTask = Task { await runFlow() }
     }
 
+    /// 嘉宾确认满意：此刻才开始上传（上传完成后大屏自动出现二维码）。
     func doneTapped() {
+        if let render = currentRender, uploadQueue.isEnabled {
+            uploadQueue.enqueue(render)
+        }
         backToWelcome()
     }
 
@@ -213,9 +223,7 @@ final class GuestFlowViewModel {
             modelContext?.insert(render)
             try? modelContext?.save()
             currentRender = render
-            if uploadQueue.isEnabled {
-                uploadQueue.enqueue(render)
-            }
+            // 不在此处上传：等嘉宾在预览页点「完成」确认后才开始（重拍则作废）
 
             // 6. 结果页（循环播放 + 自动返回倒计时）
             startResultPlayback(url: result.outputURL)
@@ -263,7 +271,8 @@ final class GuestFlowViewModel {
                 guard let self, !Task.isCancelled, self.phase == .result else { return }
                 self.autoReturnRemaining -= 1
                 if self.autoReturnRemaining <= 0 {
-                    self.backToWelcome()
+                    // 超时未选择 = 默认「完成」（保留并上传，人走了视频照样上大屏）
+                    self.doneTapped()
                     return
                 }
             }

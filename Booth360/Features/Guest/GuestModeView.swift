@@ -270,7 +270,7 @@ private struct ResultOverlay: View {
                     .frame(maxHeight: 460)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                uploadStatusRow
+                decisionHint
 
                 HStack(spacing: 16) {
                     Button {
@@ -302,46 +302,18 @@ private struct ResultOverlay: View {
         }
     }
 
-    /// 上传状态 + 二维码（上传完成即出现，扫码带走视频）。
+    /// 预览决定提示：满意点完成（此刻才上传），不满意点重拍（作废）。
     @ViewBuilder
-    private var uploadStatusRow: some View {
-        if let render = viewModel.currentRender {
-            switch render.uploadState {
-            case .done:
-                if let urlString = render.remoteURLString,
-                   let qr = QRCodeGenerator.image(for: urlString, sidePixels: 300) {
-                    HStack(spacing: 12) {
-                        Image(uiImage: qr)
-                            .resizable()
-                            .interpolation(.none)
-                            .frame(width: 108, height: 108)
-                            .padding(6)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 10))
-                        Text("扫码下载视频")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                    }
-                }
-            case .queued, .uploading:
-                HStack(spacing: 8) {
-                    ProgressView().tint(.white)
-                    if let progress = uploadQueue.progressByID[render.id] {
-                        Text("视频上传中 \(Int(progress * 100))%，稍后可扫码下载…")
-                            .font(.footnote.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.8))
-                    } else {
-                        Text("视频上传中，稍后可扫码下载…")
-                            .font(.footnote)
-                            .foregroundStyle(.white.opacity(0.8))
-                    }
-                }
-            case .failed:
-                Text("上传暂时失败，会自动重试；也可稍后在 Gallery 获取二维码")
-                    .font(.footnote)
-                    .foregroundStyle(.yellow)
-            case .none:
-                EmptyView()
-            }
+    private var decisionHint: some View {
+        if uploadQueue.isEnabled {
+            Text("满意请点「完成」— 视频会自动上传，到大屏扫码即可下载")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+        } else {
+            Text("视频已保存到本机 Gallery")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.6))
         }
     }
 }
