@@ -8,6 +8,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write   # 允许把 ipa 发布到 Releases
+
 jobs:
   build-ipa:
     name: 编译 IPA（未签名）
@@ -50,6 +53,20 @@ jobs:
           name: Booth360-unsigned-ipa
           path: build/Booth360-unsigned.ipa
           retention-days: 30
+
+      - name: 发布到 latest Release（仓库 Releases 页永远是最新包）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload latest build/Booth360-unsigned.ipa --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit latest --notes "云端自动构建 · commit ${GITHUB_SHA:0:7} · $(date '+%Y-%m-%d %H:%M') UTC" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create latest build/Booth360-unsigned.ipa \
+              --title "Booth360 最新构建" \
+              --notes "云端自动构建 · commit ${GITHUB_SHA:0:7}。未签名 ipa，Windows 上用 Sideloadly 安装（见 INSTALL_WITHOUT_MAC.md）" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
 
   unit-tests:
     name: 单元测试（模拟器）

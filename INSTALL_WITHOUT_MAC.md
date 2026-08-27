@@ -42,7 +42,10 @@ Windows 下载 ipa → Sideloadly（免费工具）签名
 
 ## 每次安装 / 更新 App 的步骤
 
-1. **拿到 ipa**：打开仓库页 → **Actions** → 点最新一次 "iOS Build" → 页面底部 **Artifacts** → 下载 `Booth360-unsigned-ipa`（是个 zip，解压得到 `Booth360-unsigned.ipa`）。
+1. **拿到 ipa**（三选一，推荐前两种）：
+   - **一键脚本**：双击运行项目里的 `scripts\update-app.ps1`，最新 ipa 自动下载到 `ipa\` 文件夹；
+   - **Releases 页**：打开 https://github.com/hugoteoh/Booth360/releases → "Booth360 最新构建" → 下载 `Booth360-unsigned.ipa`（每次云端编译成功都会自动更新这里）；
+   - 备用：仓库页 → **Actions** → 最新一次 "iOS Build" → 底部 **Artifacts** 下载（zip 需解压）。
 2. **打开 Sideloadly**，USB 连接 iPhone：
    - 左上角设备栏应显示你的 iPhone（不显示 = iTunes 驱动没装好）。
    - 把 `.ipa` 文件拖进 Sideloadly 窗口。
