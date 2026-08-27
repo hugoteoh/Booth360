@@ -1,0 +1,17 @@
+# XcodeGen 生成物（本地/CI 都用 xcodegen generate 重新生成）
+*.xcodeproj
+
+# 构建产物
+build/
+DerivedData/
+*.ipa
+*.xcarchive
+
+# Xcode / macOS 杂项
+.DS_Store
+xcuserdata/
+*.xcuserstate
+
+# Windows 杂项
+Thumbs.db
+desktop.ini

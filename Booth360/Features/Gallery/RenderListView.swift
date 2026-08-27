@@ -1,0 +1,71 @@
+import SwiftUI
+import SwiftData
+
+/// 成品列表：缩略图 + 参数摘要 + 收藏/上传状态，点击进详情。
+struct RenderListView: View {
+    let storage: FileStorageService
+
+    @Query(sort: \RenderedVideo.createdAt, order: .reverse) private var renders: [RenderedVideo]
+    @Environment(\.modelContext) private var modelContext
+
+    var body: some View {
+        Group {
+            if renders.isEmpty {
+                ContentUnavailableView(
+                    "还没有成品",
+                    systemImage: "film.stack",
+                    description: Text("在源片段里选一条做效果并导出")
+                )
+            } else {
+                List {
+                    ForEach(renders) { render in
+                        renderRow(render)
+                    }
+                    .onDelete(perform: deleteRenders)
+                }
+            }
+        }
+        .navigationTitle("成品（\(renders.count)）")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func renderRow(_ render: RenderedVideo) -> some View {
+        NavigationLink {
+            RenderDetailView(render: render, storage: storage)
+        } label: {
+            HStack(spacing: 12) {
+                VideoThumbnailView(url: storage.renderURL(fileName: render.fileName))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(render.createdAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.subheadline.weight(.medium))
+                    Text(render.settingsSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        if render.isFavorite {
+                            Image(systemName: "star.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.yellow)
+                        }
+                        if render.uploadState != .none {
+                            Label(render.uploadState.displayName,
+                                  systemImage: render.uploadState.iconName)
+                                .font(.caption2)
+                                .foregroundStyle(render.uploadState == .failed ? .red : .secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func deleteRenders(at offsets: IndexSet) {
+        for index in offsets {
+            let render = renders[index]
+            storage.deleteFileIfExists(at: storage.renderURL(fileName: render.fileName))
+            modelContext.delete(render)
+        }
+        try? modelContext.save()
+    }
+}

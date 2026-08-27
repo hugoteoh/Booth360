@@ -1,0 +1,144 @@
+import SwiftUI
+
+/// 管理员设置：嘉宾模式 PIN、上传后端（Mock / 腾讯云 COS）、系统状态。
+struct AdminSettingsView: View {
+    @Environment(SystemStatusMonitor.self) private var monitor
+    @Environment(LANControlServer.self) private var lanServer
+
+    @State private var pin = PINPadView.storedPIN
+    @State private var uploadMode = UploadMode.current
+    @State private var cosConfig = COSConfig.load()
+    @State private var profile = AccountStore.load()
+    @State private var message: String?
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    Text("管理员 PIN")
+                    Spacer()
+                    TextField("4 位数字", text: $pin)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 110)
+                        .onChange(of: pin) { _, newValue in
+                            let digits = String(newValue.filter(\.isNumber).prefix(4))
+                            pin = digits
+                            if digits.count == 4 {
+                                UserDefaults.standard.set(digits, forKey: "booth360.adminPIN")
+                            }
+                        }
+                }
+            } header: {
+                Text("嘉宾模式")
+            } footer: {
+                Text("嘉宾模式中长按屏幕左上角 2 秒，输入 PIN 退出。默认 1234。现场建议同时开启 iOS「引导式访问」（设置 → 辅助功能）防止误触退出 App。")
+            }
+
+            Section {
+                Picker("上传方式", selection: $uploadMode) {
+                    ForEach(UploadMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .onChange(of: uploadMode) { _, newValue in
+                    UploadMode.current = newValue
+                }
+
+                if uploadMode == .cos {
+                    TextField("Region（如 ap-shanghai）", text: $cosConfig.region)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    TextField("Bucket（含 APPID，如 name-1250000000）", text: $cosConfig.bucket)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    TextField("SecretId", text: $cosConfig.secretId)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    SecureField("SecretKey（存入 Keychain）", text: $cosConfig.secretKey)
+                    Button("保存 COS 配置") {
+                        cosConfig.save()
+                        message = cosConfig.isComplete
+                            ? "已保存。新导出的成品可以上传了。"
+                            : "已保存，但配置不完整，上传会失败。"
+                    }
+                }
+            } header: {
+                Text("上传 / 二维码")
+            } footer: {
+                if uploadMode == .cos {
+                    Text("视频上传到你的腾讯云 COS 桶（对象键 booth360/<id>/<文件名>），二维码为 7 天有效的预签名下载链接。SecretKey 只存在本机 Keychain。")
+                } else if uploadMode == .mock {
+                    Text("Mock 模式只在本机模拟上传流程（2 秒延时 + 假链接），用于无网/未配置时联调。")
+                }
+            }
+
+            Section {
+                Toggle("局域网控制", isOn: Binding(
+                    get: { lanServer.isRunning },
+                    set: { $0 ? lanServer.start() : lanServer.stop() }
+                ))
+                if lanServer.isRunning, let url = lanServer.displayURL {
+                    LabeledContent("控制台地址", value: url)
+                        .textSelection(.enabled)
+                }
+                if let error = lanServer.lastError {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+            } header: {
+                Text("Windows 局域网控制")
+            } footer: {
+                Text("开启后，同一 Wi-Fi 的 Windows/Mac 电脑用浏览器打开上面地址即可查看状态、切换活动、远程开始拍摄（操作需输入管理员 PIN）。首次开启 iOS 会请求“本地网络”权限，请允许。")
+            }
+
+            Section {
+                TextField("门店 / 团队名称（显示在欢迎页底部）", text: $profile.studioName)
+                    .onChange(of: profile.studioName) { _, _ in AccountStore.save(profile) }
+                TextField("联系方式（仅本机备查）", text: $profile.contact)
+                    .onChange(of: profile.contact) { _, _ in AccountStore.save(profile) }
+            } header: {
+                Text("运营信息")
+            } footer: {
+                Text("多设备账号与云端同步需要配套后端，规划在后续版本。")
+            }
+
+            Section("系统状态") {
+                LabeledContent("剩余存储", value: String(
+                    format: "%.1f GB", Double(monitor.availableBytes) / 1_000_000_000))
+                LabeledContent("电量", value: monitor.batteryLevel < 0
+                    ? "未知" : "\(Int(monitor.batteryLevel * 100))%")
+                LabeledContent("温度状态", value: thermalText)
+                ForEach(monitor.warnings) { warning in
+                    Label(warning.text, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(warning.isCritical ? .red : .yellow)
+                }
+            }
+
+            Section("关于") {
+                LabeledContent("版本", value: "0.1.0 (Phase 3)")
+            }
+        }
+        .navigationTitle("设置")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { monitor.refresh() }
+        .alert("提示", isPresented: Binding(
+            get: { message != nil },
+            set: { if !$0 { message = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(message ?? "")
+        }
+    }
+
+    private var thermalText: String {
+        switch monitor.thermalState {
+        case .nominal: return "正常"
+        case .fair: return "略热"
+        case .serious: return "偏高"
+        case .critical: return "过热！"
+        @unknown default: return "未知"
+        }
+    }
+}

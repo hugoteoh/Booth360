@@ -1,0 +1,74 @@
+# 云端 Mac 自动编译：每次 push 到 main 自动产出可安装的 .ipa
+# 在 GitHub 仓库页 → Actions → 最新一次运行 → Artifacts 下载 Booth360-unsigned-ipa
+# Windows 上用 Sideloadly 装进 iPhone（详见 INSTALL_WITHOUT_MAC.md）
+name: iOS Build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    name: 编译 IPA（未签名）
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 编译归档（不签名，签名在 Windows 端由 Sideloadly 完成）
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Booth360.xcodeproj \
+            -scheme Booth360 \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Booth360.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: 打包 IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R "build/Booth360.xcarchive/Products/Applications/Booth360.app" build/Payload/
+          cd build
+          zip -qry Booth360-unsigned.ipa Payload
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: Booth360-unsigned-ipa
+          path: build/Booth360-unsigned.ipa
+          retention-days: 30
+
+  unit-tests:
+    name: 单元测试（模拟器）
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 运行测试
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Booth360.xcodeproj \
+            -scheme Booth360 \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            CODE_SIGNING_ALLOWED=NO
