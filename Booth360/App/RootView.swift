@@ -116,6 +116,8 @@ struct RootView: View {
                         "id": render.id.uuidString,
                         "time": formatter.string(from: render.createdAt),
                         "uploaded": render.uploadState == .done && render.remoteURLString != nil,
+                        "state": render.uploadState.displayName,
+                        "failed": render.uploadState == .failed,
                     ]
                 }
             },

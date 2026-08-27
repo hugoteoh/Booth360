@@ -37,6 +37,7 @@ enum WallPageHTML {
       .item.active { background: #26203a; }
       .item .state-done { color: #4caf50; font-size: 13px; }
       .item .state-wait { color: #b8860b; font-size: 13px; }
+      .item .state-bad { color: #e05555; font-size: 13px; }
       #brand { color: #444; font-size: 13px; letter-spacing: 3px; }
     </style>
     </head>
@@ -84,7 +85,7 @@ enum WallPageHTML {
       if (item.uploaded) {
         qrbox.innerHTML = `<img src="/qr/${item.id}?v=1" alt="QR">`;
       } else {
-        qrbox.innerHTML = `<div class="waiting">☁️ 视频上传中<br>二维码马上出现…</div>`;
+        qrbox.innerHTML = `<div class="waiting">☁️ ${item.state}<br>二维码在上传完成后出现</div>`;
       }
       meta.textContent = `#${item.no} · ${item.time}`;
     }
@@ -94,7 +95,7 @@ enum WallPageHTML {
       list.innerHTML = items.map(item => `
         <div class="item ${item.id === featuredId ? "active" : ""}" onclick="feature('${item.id}', true)">
           <span>#${item.no} · ${item.time}</span>
-          <span class="${item.uploaded ? "state-done" : "state-wait"}">${item.uploaded ? "✓ 可下载" : "上传中"}</span>
+          <span class="${item.uploaded ? "state-done" : (item.failed ? "state-bad" : "state-wait")}">${item.uploaded ? "✓ 可下载" : item.state}</span>
         </div>`).join("");
     }
 

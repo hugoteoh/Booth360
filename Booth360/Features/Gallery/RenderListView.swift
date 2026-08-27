@@ -7,6 +7,8 @@ struct RenderListView: View {
 
     @Query(sort: \RenderedVideo.createdAt, order: .reverse) private var renders: [RenderedVideo]
     @Environment(\.modelContext) private var modelContext
+    @Environment(UploadQueue.self) private var uploadQueue
+    @State private var batchMessage: String?
 
     var body: some View {
         Group {
@@ -27,6 +29,44 @@ struct RenderListView: View {
         }
         .navigationTitle("成品（\(renders.count)）")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    batchUploadPending()
+                } label: {
+                    Label("补传全部", systemImage: "icloud.and.arrow.up.fill")
+                }
+                .disabled(!uploadQueue.isEnabled)
+            }
+        }
+        .alert("提示", isPresented: Binding(
+            get: { batchMessage != nil },
+            set: { if !$0 { batchMessage = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(batchMessage ?? "")
+        }
+    }
+
+    /// 把所有「未上传 / 上传失败」的成品一次性排进队列
+    /// （典型场景：先拍了片、后配好 COS，历史成品需要补传）。
+    private func batchUploadPending() {
+        guard uploadQueue.isEnabled else { return }
+        var count = 0
+        for render in renders {
+            switch render.uploadState {
+            case .none:
+                uploadQueue.enqueue(render)
+                count += 1
+            case .failed:
+                uploadQueue.retryNow(render)
+                count += 1
+            default:
+                break
+            }
+        }
+        batchMessage = count == 0 ? "没有需要补传的成品。" : "已把 \(count) 条排入上传队列。"
     }
 
     private func renderRow(_ render: RenderedVideo) -> some View {
