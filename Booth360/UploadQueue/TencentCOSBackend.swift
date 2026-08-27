@@ -46,19 +46,33 @@ struct COSConfig {
 ///       Signature = HMAC-SHA1(SignKey, StringToSign)。
 enum COSSigner {
 
+    /// 生成预签名 URL。extraHeaders 会一并签入（如 x-cos-acl），
+    /// 发请求时必须携带完全相同的这些头。
     static func signedURL(
         config: COSConfig,
         objectKey: String,
         method: String,
         expiresSeconds: TimeInterval,
-        now: Date = Date()
+        now: Date = Date(),
+        extraHeaders: [String: String] = [:]
     ) -> URL? {
         let start = Int(now.timeIntervalSince1970)
         let end = start + Int(expiresSeconds)
         let keyTime = "\(start);\(end)"
 
+        // 签名头：host + extra，按 key 字典序排序（COS 规范）
+        var headers = extraHeaders.reduce(into: [String: String]()) { result, pair in
+            result[pair.key.lowercased()] = pair.value
+        }
+        headers["host"] = config.host
+        let sortedKeys = headers.keys.sorted()
+        let headerList = sortedKeys.joined(separator: ";")
+        let headerString = sortedKeys
+            .map { "\($0)=\(rfc3986Encode(headers[$0] ?? ""))" }
+            .joined(separator: "&")
+
         let signKey = hmacSHA1Hex(key: config.secretKey, message: keyTime)
-        let httpString = "\(method.lowercased())\n/\(objectKey)\n\nhost=\(config.host)\n"
+        let httpString = "\(method.lowercased())\n/\(objectKey)\n\n\(headerString)\n"
         let stringToSign = "sha1\n\(keyTime)\n\(sha1Hex(httpString))\n"
         let signature = hmacSHA1Hex(key: signKey, message: stringToSign)
 
@@ -71,11 +85,18 @@ enum COSSigner {
             URLQueryItem(name: "q-ak", value: config.secretId),
             URLQueryItem(name: "q-sign-time", value: keyTime),
             URLQueryItem(name: "q-key-time", value: keyTime),
-            URLQueryItem(name: "q-header-list", value: "host"),
+            URLQueryItem(name: "q-header-list", value: headerList),
             URLQueryItem(name: "q-url-param-list", value: ""),
             URLQueryItem(name: "q-signature", value: signature),
         ]
         return components.url
+    }
+
+    /// COS 要求的 RFC 3986 编码（保留字母数字与 -_.~）。
+    static func rfc3986Encode(_ value: String) -> String {
+        let allowed = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     static func hmacSHA1Hex(key: String, message: String) -> String {

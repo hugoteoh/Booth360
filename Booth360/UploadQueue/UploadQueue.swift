@@ -165,6 +165,7 @@ final class UploadQueue {
             nextRetryAt[render.id] = nil
             try? modelContext.save()
             AppLogger.storage.info("上传完成: \(render.fileName, privacy: .public)")
+            publishCloudWallIfNeeded()
         } catch {
             progressByID[renderID] = nil
             render.uploadAttempts += 1
@@ -176,6 +177,34 @@ final class UploadQueue {
             AppLogger.storage.error("上传失败(第\(render.uploadAttempts)次): \(error.localizedDescription, privacy: .public)，\(Int(delay))s 后重试")
             scheduleRetry(after: delay)
         }
+    }
+
+    /// 云端大屏开关（默认开，设置页可关）。
+    static var cloudWallEnabled: Bool {
+        get {
+            UserDefaults.standard.object(forKey: "booth360.cloudWallEnabled") == nil
+                || UserDefaults.standard.bool(forKey: "booth360.cloudWallEnabled")
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "booth360.cloudWallEnabled") }
+    }
+
+    /// COS 模式且开关打开时，把最近 30 条已上传成品发布/刷新到云端大屏。
+    private func publishCloudWallIfNeeded() {
+        guard UploadMode.current == .cos, Self.cloudWallEnabled else { return }
+        var descriptor = FetchDescriptor<RenderedVideo>(
+            predicate: #Predicate { $0.uploadStateRawValue == "done" },
+            sortBy: [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 30
+        let items = ((try? modelContext.fetch(descriptor)) ?? []).map { render in
+            CloudWallPublisher.WallItem(
+                id: render.id,
+                createdAt: render.createdAt,
+                fileName: render.fileName
+            )
+        }
+        guard !items.isEmpty else { return }
+        Task { await CloudWallPublisher.publish(items: items) }
     }
 
     private func makeBackend() -> UploadBackend? {

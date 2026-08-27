@@ -60,6 +60,35 @@ final class UploadTests: XCTestCase {
         XCTAssertTrue(signature.allSatisfy(\.isHexDigit))
     }
 
+    func testSignedURLWithExtraHeaders() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let url = try XCTUnwrap(COSSigner.signedURL(
+            config: config,
+            objectKey: "booth360/wall/wall.json",
+            method: "put",
+            expiresSeconds: 600,
+            now: now,
+            extraHeaders: ["x-cos-acl": "public-read"]
+        ))
+        let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+        // 头列表按字典序：host < x-cos-acl
+        XCTAssertEqual(value("q-header-list"), "host;x-cos-acl")
+        let signature = try XCTUnwrap(value("q-signature"))
+        XCTAssertEqual(signature.count, 40)
+        // 带头与不带头的签名必须不同
+        let plain = COSSigner.signedURL(
+            config: config, objectKey: "booth360/wall/wall.json",
+            method: "put", expiresSeconds: 600, now: now)
+        XCTAssertNotEqual(url, plain)
+    }
+
+    func testRFC3986Encode() {
+        XCTAssertEqual(COSSigner.rfc3986Encode("public-read"), "public-read")
+        XCTAssertEqual(COSSigner.rfc3986Encode("a b/c"), "a%20b%2Fc")
+        XCTAssertEqual(COSSigner.rfc3986Encode("值"), "%E5%80%BC")
+    }
+
     func testSignatureIsDeterministicAndMethodSensitive() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let putA = COSSigner.signedURL(config: config, objectKey: "k/v.mp4", method: "put", expiresSeconds: 60, now: now)

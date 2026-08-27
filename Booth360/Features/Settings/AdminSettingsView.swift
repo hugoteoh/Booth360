@@ -62,12 +62,21 @@ struct AdminSettingsView: View {
                             ? "已保存。新导出的成品可以上传了。"
                             : "已保存，但配置不完整，上传会失败。"
                     }
+                    Toggle("云端大屏（不同网络的大屏用）", isOn: Binding(
+                        get: { UploadQueue.cloudWallEnabled },
+                        set: { UploadQueue.cloudWallEnabled = $0 }
+                    ))
+                    if UploadQueue.cloudWallEnabled, cosConfig.isComplete,
+                       let wallURL = CloudWallPublisher.pageURLString {
+                        LabeledContent("云端大屏地址", value: wallURL)
+                            .textSelection(.enabled)
+                    }
                 }
             } header: {
                 Text("上传 / 二维码")
             } footer: {
                 if uploadMode == .cos {
-                    Text("视频上传到你的腾讯云 COS 桶（对象键 booth360/<id>/<文件名>），二维码为 7 天有效的预签名下载链接。SecretKey 只存在本机 Keychain。")
+                    Text("视频上传到你的腾讯云 COS 桶（对象键 booth360/<id>/<文件名>），二维码为 7 天有效的预签名下载链接。SecretKey 只存在本机 Keychain。\n\n云端大屏：每次上传完成自动把节目单发布到桶里，任何网络的电脑打开上面地址即可全屏展示（无需与手机同网）；页面公开可读，知道链接的人都能看，活动结束可到 COS 控制台删除 booth360/wall/ 目录下架。")
                 } else if uploadMode == .mock {
                     Text("Mock 模式只在本机模拟上传流程（2 秒延时 + 假链接），用于无网/未配置时联调。")
                 }
