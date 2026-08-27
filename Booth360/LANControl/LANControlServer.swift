@@ -39,9 +39,18 @@ final class LANControlServer {
     func start() {
         guard !isRunning else { return }
         lastError = nil
+        startListener(withBonjour: true)
+    }
+
+    /// Bonjour 广播在「本地网络」权限被拒时会以 DefunctConnection 失败；
+    /// 广播只是可选的发现功能（访问全靠 IP 地址），失败就自动降级为纯 IP 模式重启，
+    /// 保证服务器总能起来。
+    private func startListener(withBonjour: Bool) {
         do {
             let listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: Self.port)!)
-            listener.service = NWListener.Service(name: "Booth360", type: "_booth360._tcp")
+            if withBonjour {
+                listener.service = NWListener.Service(name: "Booth360", type: "_booth360._tcp")
+            }
             listener.newConnectionHandler = { [weak self] connection in
                 connection.start(queue: .main)
                 Task { @MainActor [weak self] in
@@ -56,11 +65,17 @@ final class LANControlServer {
                         self.isRunning = true
                         let ip = Self.localIPAddress() ?? "<手机IP>"
                         self.displayURL = "http://\(ip):\(Self.port)"
-                        AppLogger.ui.info("局域网控制已启动: \(self.displayURL ?? "", privacy: .public)")
+                        AppLogger.ui.info("局域网控制已启动: \(self.displayURL ?? "", privacy: .public)\(withBonjour ? "" : "（纯 IP 模式）")")
                     case .failed(let error):
-                        self.isRunning = false
-                        self.lastError = error.localizedDescription
+                        self.listener?.cancel()
                         self.listener = nil
+                        if withBonjour {
+                            AppLogger.ui.warning("Bonjour 注册失败（多为本地网络权限被拒），降级纯 IP 模式重试: \(error.localizedDescription, privacy: .public)")
+                            self.startListener(withBonjour: false)
+                        } else {
+                            self.isRunning = false
+                            self.lastError = "启动失败：\(error.localizedDescription)。请到 设置 → 隐私与安全性 → 本地网络 允许 Booth360，然后重开此开关。"
+                        }
                     case .cancelled:
                         self.isRunning = false
                     default:
