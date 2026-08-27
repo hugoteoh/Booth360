@@ -5,23 +5,26 @@ import Observation
 /// 转台蓝牙指令的十六进制解析（"A5 01 5A" / "0x01,0x02" / "a5015a" 均可）。纯逻辑，单测覆盖。
 enum HexCommand {
     static func parse(_ text: String) -> Data? {
-        let cleaned = text
-            .replacingOccurrences(of: "0x", with: "")
-            .replacingOccurrences(of: "0X", with: "")
+        // 逐 token 校验（不能全局拼接：否则 "0x1 0x2" 两个半字节会被误拼成 0x12）
+        let tokens = text
             .replacingOccurrences(of: ",", with: " ")
             .replacingOccurrences(of: "-", with: " ")
             .split(separator: " ")
-            .joined()
-        guard !cleaned.isEmpty, cleaned.count % 2 == 0 else { return nil }
-        var data = Data(capacity: cleaned.count / 2)
-        var index = cleaned.startIndex
-        while index < cleaned.endIndex {
-            let next = cleaned.index(index, offsetBy: 2)
-            guard let byte = UInt8(cleaned[index..<next], radix: 16) else { return nil }
-            data.append(byte)
-            index = next
+        guard !tokens.isEmpty else { return nil }
+        var data = Data()
+        for token in tokens {
+            var hex = String(token)
+            if hex.lowercased().hasPrefix("0x") { hex = String(hex.dropFirst(2)) }
+            guard !hex.isEmpty, hex.count % 2 == 0 else { return nil }
+            var index = hex.startIndex
+            while index < hex.endIndex {
+                let next = hex.index(index, offsetBy: 2)
+                guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
+                data.append(byte)
+                index = next
+            }
         }
-        return data
+        return data.isEmpty ? nil : data
     }
 }
 
