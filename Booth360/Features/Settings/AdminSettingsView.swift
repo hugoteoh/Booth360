@@ -81,6 +81,8 @@ struct AdminSettingsView: View {
                 if lanServer.isRunning, let url = lanServer.displayURL {
                     LabeledContent("控制台地址", value: url)
                         .textSelection(.enabled)
+                    LabeledContent("大屏展示页", value: "\(url)/wall")
+                        .textSelection(.enabled)
                 }
                 if let error = lanServer.lastError {
                     Text(error).font(.caption).foregroundStyle(.red)
@@ -88,7 +90,7 @@ struct AdminSettingsView: View {
             } header: {
                 Text("Windows 局域网控制")
             } footer: {
-                Text("开启后，同一 Wi-Fi 的 Windows/Mac 电脑用浏览器打开上面地址即可查看状态、切换活动、远程开始拍摄（操作需输入管理员 PIN）。首次开启 iOS 会请求“本地网络”权限，请允许。")
+                Text("开启后，同一 Wi-Fi 的电脑用浏览器打开「控制台地址」可查看状态、切换活动、远程开始拍摄（操作需 PIN）；打开「大屏展示页」并按 F11 全屏投到大电视——最新视频自动上屏循环播放、嘉宾扫旁边二维码下载（视频走局域网，二维码在上传完成后自动出现）。首次开启 iOS 会请求“本地网络”权限，请允许。现场没有路由器时，手机开「个人热点」让电脑连上来即可。")
             }
 
             Section {

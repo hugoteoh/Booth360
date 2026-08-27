@@ -39,6 +39,7 @@ enum ControlPageHTML {
     <h2>控制</h2>
     <button class="primary" onclick="post('/api/guest/start')">▶ 开始拍摄</button>
     <button onclick="post('/api/guest/open')">打开嘉宾模式</button>
+    <button onclick="window.open('/wall', '_blank')">🖥 打开大屏展示页</button>
 
     <h2>活动</h2>
     <div id="events">加载中…</div>

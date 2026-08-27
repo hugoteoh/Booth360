@@ -17,6 +17,12 @@ final class LANControlServer {
         var activateEvent: (UUID) -> Bool
         var openGuest: () -> Bool
         var startCapture: () -> Bool
+        /// 大屏页数据：成品列表（新→旧，含上传状态与下载链接）。
+        var renders: () -> [[String: Any]]
+        /// 按成品 id 取视频文件内容（大屏局域网直播放，不等云端）。
+        var videoData: (UUID) -> Data?
+        /// 按成品 id 生成下载二维码 PNG（remoteURL 就绪后才有）。
+        var qrPNG: (UUID) -> Data?
     }
 
     static let port: UInt16 = 8360
@@ -123,6 +129,26 @@ final class LANControlServer {
         case ("GET", "/"):
             return ("200 OK", "text/html; charset=utf-8", Data(ControlPageHTML.html.utf8))
 
+        case ("GET", "/wall"):
+            return ("200 OK", "text/html; charset=utf-8", Data(WallPageHTML.html.utf8))
+
+        case ("GET", "/api/renders"):
+            return jsonArray(handlers?.renders() ?? [])
+
+        case ("GET", let path) where path.hasPrefix("/video/"):
+            guard let id = UUID(uuidString: String(path.dropFirst("/video/".count))),
+                  let data = handlers?.videoData(id) else {
+                return ("404 Not Found", "text/plain", Data("no video".utf8))
+            }
+            return ("200 OK", "video/mp4", data)
+
+        case ("GET", let path) where path.hasPrefix("/qr/"):
+            guard let id = UUID(uuidString: String(path.dropFirst("/qr/".count))),
+                  let data = handlers?.qrPNG(id) else {
+                return ("404 Not Found", "text/plain", Data("no qr".utf8))
+            }
+            return ("200 OK", "image/png", data)
+
         case ("GET", "/api/status"):
             let payload = handlers?.status() ?? [:]
             return json(payload)
@@ -183,9 +209,10 @@ final class LANControlServer {
 
     // MARK: - 本机 IP
 
-    /// Wi-Fi (en0) 的 IPv4 地址，用于展示控制台网址。
+    /// 本机 IPv4 地址：优先 Wi-Fi (en0)，其次个人热点 (bridge*)。
     static func localIPAddress() -> String? {
-        var address: String?
+        var wifiAddress: String?
+        var hotspotAddress: String?
         var ifaddrPointer: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifaddrPointer) == 0 else { return nil }
         defer { freeifaddrs(ifaddrPointer) }
@@ -193,18 +220,20 @@ final class LANControlServer {
         var pointer = ifaddrPointer
         while let current = pointer {
             let interface = current.pointee
-            if let addr = interface.ifa_addr,
-               addr.pointee.sa_family == UInt8(AF_INET),
-               String(cString: interface.ifa_name) == "en0" {
-                var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                if getnameinfo(addr, socklen_t(addr.pointee.sa_len),
-                               &hostname, socklen_t(hostname.count),
-                               nil, 0, NI_NUMERICHOST) == 0 {
-                    address = String(cString: hostname)
+            if let addr = interface.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) {
+                let name = String(cString: interface.ifa_name)
+                if name == "en0" || name.hasPrefix("bridge") {
+                    var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    if getnameinfo(addr, socklen_t(addr.pointee.sa_len),
+                                   &hostname, socklen_t(hostname.count),
+                                   nil, 0, NI_NUMERICHOST) == 0 {
+                        let value = String(cString: hostname)
+                        if name == "en0" { wifiAddress = value } else { hotspotAddress = value }
+                    }
                 }
             }
             pointer = interface.ifa_next
         }
-        return address
+        return wifiAddress ?? hotspotAddress
     }
 }

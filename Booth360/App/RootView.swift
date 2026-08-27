@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// 根视图：管理员端（拍摄 + 活动 + Gallery + 设置）+ 嘉宾模式全屏覆盖 + 局域网控制接线。
 struct RootView: View {
@@ -102,7 +103,40 @@ struct RootView: View {
                 guard remoteHub.guestActive else { return false }
                 remoteHub.requestStart()
                 return true
+            },
+            renders: {
+                var descriptor = FetchDescriptor<RenderedVideo>(
+                    sortBy: [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)])
+                descriptor.fetchLimit = 30
+                let items = (try? modelContext.fetch(descriptor)) ?? []
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm"
+                return items.map { render in
+                    [
+                        "id": render.id.uuidString,
+                        "time": formatter.string(from: render.createdAt),
+                        "uploaded": render.uploadState == .done && render.remoteURLString != nil,
+                    ]
+                }
+            },
+            videoData: { id in
+                guard let render = Self.fetchRender(id: id, in: modelContext) else { return nil }
+                return try? Data(contentsOf: storage.renderURL(fileName: render.fileName))
+            },
+            qrPNG: { id in
+                guard let render = Self.fetchRender(id: id, in: modelContext),
+                      let urlString = render.remoteURLString,
+                      let image = QRCodeGenerator.image(for: urlString, sidePixels: 544) else {
+                    return nil
+                }
+                return image.pngData()
             }
         )
+    }
+
+    private static func fetchRender(id: UUID, in context: ModelContext) -> RenderedVideo? {
+        var descriptor = FetchDescriptor<RenderedVideo>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
     }
 }
