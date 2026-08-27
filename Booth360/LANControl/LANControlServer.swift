@@ -38,7 +38,9 @@ final class LANControlServer {
             listener.service = NWListener.Service(name: "Booth360", type: "_booth360._tcp")
             listener.newConnectionHandler = { [weak self] connection in
                 connection.start(queue: .main)
-                self?.receive(on: connection, buffer: Data())
+                Task { @MainActor [weak self] in
+                    self?.receive(on: connection, buffer: Data())
+                }
             }
             listener.stateUpdateHandler = { [weak self] state in
                 Task { @MainActor [weak self] in

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import SwiftData
 import AVFoundation
 import Photos
