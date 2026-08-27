@@ -26,6 +26,7 @@ struct EditView: View {
 private struct EditFormView: View {
     @Bindable var viewModel: EditViewModel
     @Environment(\.modelContext) private var modelContext
+    @Environment(UploadQueue.self) private var uploadQueue
     @State private var overlayPickerItem: PhotosPickerItem?
 
     private enum FileImportTarget {
@@ -193,7 +194,7 @@ private struct EditFormView: View {
                         .frame(maxWidth: .infinity)
                 }
                 Button {
-                    Task { await viewModel.exportTapped(modelContext: modelContext) }
+                    Task { await viewModel.exportTapped(modelContext: modelContext, uploadQueue: uploadQueue) }
                 } label: {
                     Label("导出成品", systemImage: "square.and.arrow.up.on.square")
                         .frame(maxWidth: .infinity)

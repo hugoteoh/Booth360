@@ -84,6 +84,27 @@ final class UploadQueue {
         enqueue(render)
     }
 
+    /// 把所有「未上传 / 上传失败」的成品自动排入队列。
+    /// 触发点：App 启动、上传方式切换、COS 配置保存——用户永远不需要手动补传。
+    func enqueueAllPending() {
+        guard isEnabled else { return }
+        let descriptor = FetchDescriptor<RenderedVideo>(
+            predicate: #Predicate {
+                $0.uploadStateRawValue == "none" || $0.uploadStateRawValue == "failed"
+            }
+        )
+        guard let items = try? modelContext.fetch(descriptor), !items.isEmpty else { return }
+        for item in items {
+            nextRetryAt[item.id] = nil
+            item.uploadAttempts = 0
+            item.uploadState = .queued
+            item.lastUploadError = nil
+        }
+        try? modelContext.save()
+        AppLogger.storage.info("自动补传 \(items.count) 条历史成品")
+        pump()
+    }
+
     /// App 启动时调用：上次中断在 uploading 的回退为 queued，连同 queued/failed 一起继续。
     func resumePendingOnLaunch() {
         guard isEnabled else { return }
@@ -94,13 +115,18 @@ final class UploadQueue {
                     || $0.uploadStateRawValue == "failed"
             }
         )
-        guard let items = try? modelContext.fetch(descriptor), !items.isEmpty else { return }
+        guard let items = try? modelContext.fetch(descriptor), !items.isEmpty else {
+            enqueueAllPending()
+            return
+        }
         for item in items where item.uploadState == .uploading {
             item.uploadState = .queued
         }
         try? modelContext.save()
         AppLogger.storage.info("上传队列恢复 \(items.count) 项")
         pump()
+        // 顺带把从未上传过的也扫进来（例如拍摄时上传功能还没开）
+        enqueueAllPending()
     }
 
     // MARK: - 队列泵

@@ -4,6 +4,7 @@ import SwiftUI
 struct AdminSettingsView: View {
     @Environment(SystemStatusMonitor.self) private var monitor
     @Environment(LANControlServer.self) private var lanServer
+    @Environment(UploadQueue.self) private var uploadQueue
 
     @State private var pin = PINPadView.storedPIN
     @State private var uploadMode = UploadMode.current
@@ -43,6 +44,8 @@ struct AdminSettingsView: View {
                 }
                 .onChange(of: uploadMode) { _, newValue in
                     UploadMode.current = newValue
+                    // 打开上传即自动补传所有历史成品，无需手动
+                    uploadQueue.enqueueAllPending()
                 }
 
                 if uploadMode == .cos {
@@ -58,9 +61,12 @@ struct AdminSettingsView: View {
                     SecureField("SecretKey（存入 Keychain）", text: $cosConfig.secretKey)
                     Button("保存 COS 配置") {
                         cosConfig.save()
-                        message = cosConfig.isComplete
-                            ? "已保存。新导出的成品可以上传了。"
-                            : "已保存，但配置不完整，上传会失败。"
+                        if cosConfig.isComplete {
+                            uploadQueue.enqueueAllPending()
+                            message = "已保存。所有未上传的成品已自动排入上传队列。"
+                        } else {
+                            message = "已保存，但配置不完整，上传会失败。"
+                        }
                     }
                     Toggle("云端大屏（不同网络的大屏用）", isOn: Binding(
                         get: { UploadQueue.cloudWallEnabled },

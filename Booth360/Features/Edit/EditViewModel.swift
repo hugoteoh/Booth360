@@ -169,7 +169,7 @@ final class EditViewModel {
         }
     }
 
-    func exportTapped(modelContext: ModelContext) async {
+    func exportTapped(modelContext: ModelContext, uploadQueue: UploadQueue?) async {
         guard !engine.isBusy else { return }
         errorMessage = nil
         let outputURL = storage.newRenderURL()
@@ -193,6 +193,10 @@ final class EditViewModel {
             )
             modelContext.insert(rendered)
             try? modelContext.save()
+            // 导出即自动上传（上传功能开启时），无需手动
+            if let uploadQueue, uploadQueue.isEnabled {
+                uploadQueue.enqueue(rendered)
+            }
             presentation = PlaybackPresentation(
                 playerItem: AVPlayerItem(url: result.outputURL),
                 exportedURL: result.outputURL,
