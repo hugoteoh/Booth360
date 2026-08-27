@@ -107,6 +107,31 @@ private struct EditFormView: View {
             }
 
             Section {
+                Toggle("美颜（磨皮 · 柔光 · 提亮）", isOn: $viewModel.settings.beautyEnabled)
+                if viewModel.settings.beautyEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("美颜强度")
+                            Spacer()
+                            Text("\(Int(viewModel.settings.beautyStrength * 100))%")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $viewModel.settings.beautyStrength, in: 0...1)
+                    }
+                }
+                Picker("滤镜", selection: $viewModel.settings.filterPreset) {
+                    ForEach(FilterPreset.allCases) { preset in
+                        Text(preset.displayName).tag(preset)
+                    }
+                }
+            } header: {
+                Text("美颜与滤镜")
+            } footer: {
+                Text("美颜与滤镜在导出时处理（会多一小段处理时间），预览不显示。")
+            }
+
+            Section {
                 Toggle("使用 Overlay", isOn: $viewModel.settings.overlayEnabled)
                     .disabled(viewModel.overlayImage == nil)
                 PhotosPicker(selection: $overlayPickerItem, matching: .images) {

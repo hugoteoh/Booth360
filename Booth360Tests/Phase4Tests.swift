@@ -1,4 +1,5 @@
 import XCTest
+import CoreImage
 @testable import Booth360
 
 final class Phase4Tests: XCTestCase {
@@ -80,6 +81,26 @@ final class Phase4Tests: XCTestCase {
     func testRejectsGarbage() {
         XCTAssertNil(HTTPRequestParser.parse(""))
         XCTAssertNil(HTTPRequestParser.parse("NOTHTTP"))
+    }
+
+    // MARK: - VideoPostFX（美颜/滤镜）
+
+    func testPostFXKeepsFrameExtent() {
+        let source = CIImage(color: CIColor(red: 0.8, green: 0.6, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: 320, height: 240))
+        for preset in FilterPreset.allCases {
+            let output = VideoPostFX.process(source, beautyStrength: 0.8, filter: preset)
+            XCTAssertEqual(output.extent, source.extent, "\(preset.rawValue) 输出画幅必须不变")
+        }
+        // 强度 0 + 无滤镜 = 原样返回
+        let untouched = VideoPostFX.process(source, beautyStrength: 0, filter: .none)
+        XCTAssertEqual(untouched.extent, source.extent)
+    }
+
+    func testPostFXNeededLogic() {
+        XCTAssertFalse(VideoPostFX.isNeeded(beautyEnabled: false, filter: .none))
+        XCTAssertTrue(VideoPostFX.isNeeded(beautyEnabled: true, filter: .none))
+        XCTAssertTrue(VideoPostFX.isNeeded(beautyEnabled: false, filter: .warm))
     }
 
     // MARK: - HexCommand（转台指令解析）

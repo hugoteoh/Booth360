@@ -126,6 +126,13 @@ struct EffectSettings: Equatable, Codable {
     var introEnabled: Bool = true
     var outroEnabled: Bool = true
 
+    /// 美颜（磨皮柔光提亮，导出后处理；预览不含）。
+    var beautyEnabled: Bool = false
+    /// 美颜强度 0…1。
+    var beautyStrength: Double = 0.6
+    /// 色彩滤镜预设。
+    var filterPreset: FilterPreset = .none
+
     var aspect: OutputAspect = .portrait916
     var resolution: OutputResolution = .r1080
     var codec: OutputCodec = .hevc
@@ -146,6 +153,9 @@ struct EffectSettings: Equatable, Codable {
         originalAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .originalAudioEnabled) ?? false
         introEnabled = try container.decodeIfPresent(Bool.self, forKey: .introEnabled) ?? true
         outroEnabled = try container.decodeIfPresent(Bool.self, forKey: .outroEnabled) ?? true
+        beautyEnabled = try container.decodeIfPresent(Bool.self, forKey: .beautyEnabled) ?? false
+        beautyStrength = try container.decodeIfPresent(Double.self, forKey: .beautyStrength) ?? 0.6
+        filterPreset = try container.decodeIfPresent(FilterPreset.self, forKey: .filterPreset) ?? .none
         aspect = try container.decodeIfPresent(OutputAspect.self, forKey: .aspect) ?? .portrait916
         resolution = try container.decodeIfPresent(OutputResolution.self, forKey: .resolution) ?? .r1080
         codec = try container.decodeIfPresent(OutputCodec.self, forKey: .codec) ?? .hevc
@@ -180,10 +190,12 @@ struct EffectSettings: Equatable, Codable {
         Self.renderSize(aspect: aspect, resolution: resolution)
     }
 
-    /// 存入 RenderedVideo 的可读描述，如 "慢-快-慢 · Boomerang · ×2 · 9:16 1080p HEVC"。
+    /// 存入 RenderedVideo 的可读描述，如 "慢-快-慢 · Boomerang · ×2 · 美颜 · 9:16 1080p HEVC"。
     var summaryText: String {
         var parts = [speed.displayName, style.displayName]
         if loopCount > 1 { parts.append("×\(loopCount)") }
+        if beautyEnabled { parts.append("美颜") }
+        if filterPreset != .none { parts.append(filterPreset.displayName) }
         parts.append("\(aspect.displayName) \(resolution.displayName) \(codec == .hevc ? "HEVC" : "H.264")")
         return parts.joined(separator: " · ")
     }

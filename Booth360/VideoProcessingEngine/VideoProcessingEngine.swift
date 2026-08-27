@@ -13,6 +13,7 @@ final class VideoProcessingEngine {
         case idle
         case reversing
         case exporting
+        case beautifying
         case failed(String)
 
         var displayText: String {
@@ -20,6 +21,7 @@ final class VideoProcessingEngine {
             case .idle: return ""
             case .reversing: return "正在生成倒放素材…"
             case .exporting: return "正在导出成品…"
+            case .beautifying: return "正在美颜 / 滤镜处理…"
             case .failed(let message): return message
             }
         }
@@ -90,7 +92,41 @@ final class VideoProcessingEngine {
                 overlayImage: request.settings.overlayEnabled ? request.overlayImage : nil,
                 flag: flag
             )
-            let result = try await runExport(request: request, built: built, flag: flag)
+            let needsPostFX = VideoPostFX.isNeeded(
+                beautyEnabled: request.settings.beautyEnabled,
+                filter: request.settings.filterPreset
+            )
+            let result = try await runExport(
+                request: request, built: built, flag: flag,
+                progressCeiling: needsPostFX ? 0.85 : 1.0
+            )
+            if needsPostFX {
+                stage = .beautifying
+                let tmpURL = request.outputURL.deletingLastPathComponent()
+                    .appendingPathComponent("postfx_\(request.outputURL.lastPathComponent)")
+                do {
+                    try await VideoPostFX.apply(
+                        inputURL: request.outputURL,
+                        outputURL: tmpURL,
+                        beautyStrength: request.settings.beautyStrength,
+                        filter: request.settings.filterPreset,
+                        codec: request.settings.codec,
+                        progressHandler: { [weak self] value in
+                            Task { @MainActor [weak self] in
+                                self?.progress = 0.85 + 0.15 * value
+                            }
+                        },
+                        isCancelled: { flag.isCancelled }
+                    )
+                    try FileManager.default.removeItem(at: request.outputURL)
+                    try FileManager.default.moveItem(at: tmpURL, to: request.outputURL)
+                } catch {
+                    // 后处理失败/取消：连同已导出的中间成品一起清掉，避免出现无记录的孤儿文件
+                    try? FileManager.default.removeItem(at: tmpURL)
+                    try? FileManager.default.removeItem(at: request.outputURL)
+                    throw error
+                }
+            }
             stage = .idle
             progress = 1
             return result
@@ -204,11 +240,12 @@ final class VideoProcessingEngine {
     private func runExport(
         request: RenderRequest,
         built: BuiltComposition,
-        flag: CancelFlag
+        flag: CancelFlag,
+        progressCeiling: Double = 1.0
     ) async throws -> RenderResult {
         stage = .exporting
         let baseProgress = request.settings.needsReversedAsset ? 0.45 : 0.0
-        let span = 1.0 - baseProgress
+        let span = progressCeiling - baseProgress
 
         try? FileManager.default.removeItem(at: request.outputURL)
 

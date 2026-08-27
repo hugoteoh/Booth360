@@ -75,6 +75,20 @@ struct EventEditView: View {
                     ForEach(PlaybackStyle.allCases) { Text($0.displayName).tag($0) }
                 }
                 Stepper("循环 ×\(effectDraft.loopCount)", value: $effectDraft.loopCount, in: 1...3)
+                Toggle("美颜（磨皮 · 柔光 · 提亮）", isOn: $effectDraft.beautyEnabled)
+                if effectDraft.beautyEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("美颜强度")
+                            Spacer()
+                            Text("\(Int(effectDraft.beautyStrength * 100))%").foregroundStyle(.secondary)
+                        }
+                        Slider(value: $effectDraft.beautyStrength, in: 0...1)
+                    }
+                }
+                Picker("滤镜", selection: $effectDraft.filterPreset) {
+                    ForEach(FilterPreset.allCases) { Text($0.displayName).tag($0) }
+                }
                 Toggle("使用 Overlay", isOn: $effectDraft.overlayEnabled)
                     .disabled(event.overlayFileName == nil)
                 Toggle("使用动态 Overlay", isOn: $effectDraft.overlayVideoEnabled)

@@ -59,6 +59,8 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertTrue(decoded.introEnabled)
         XCTAssertTrue(decoded.outroEnabled)
         XCTAssertFalse(decoded.overlayVideoEnabled)
+        XCTAssertFalse(decoded.beautyEnabled)
+        XCTAssertEqual(decoded.filterPreset, .none)
     }
 
     func testEventEffectSettingsAccessorFallsBackOnBadData() {

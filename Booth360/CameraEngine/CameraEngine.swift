@@ -211,6 +211,20 @@ final class CameraEngine {
             session.addOutput(movieOutput)
         }
 
+        // 视频防抖：按当前格式能力选最强档（cinematicExtended > cinematic > auto）。
+        // 部分高帧率格式不支持防抖，isVideoStabilizationSupported 会为 false，自动跳过。
+        if let connection = movieOutput.connection(with: .video),
+           connection.isVideoStabilizationSupported {
+            if format.isVideoStabilizationModeSupported(.cinematicExtended) {
+                connection.preferredVideoStabilizationMode = .cinematicExtended
+            } else if format.isVideoStabilizationModeSupported(.cinematic) {
+                connection.preferredVideoStabilizationMode = .cinematic
+            } else {
+                connection.preferredVideoStabilizationMode = .auto
+            }
+            AppLogger.camera.info("防抖模式: \(String(describing: connection.preferredVideoStabilizationMode.rawValue), privacy: .public)")
+        }
+
         activeSelection = (configuration, selection.frameRate)
         return ConfigurationResult(
             frameRate: selection.frameRate,
