@@ -42,7 +42,9 @@ final class CaptureViewModel {
     }
     var errorMessage: String?
 
-    var settings = RecordingSettings()
+    var settings = RecordingSettings() {
+        didSet { Self.persistSettings(settings) }
+    }
     var manualControls = ManualControlState()
     /// 当前活动启用的拍摄模式（拍摄页底部按钮排）。
     private(set) var shotModes: [ShotMode] = []
@@ -78,6 +80,8 @@ final class CaptureViewModel {
     init(engine: CameraEngine, storage: FileStorageService) {
         self.engine = engine
         self.storage = storage
+        adminConfiguration = Self.loadConfiguration()
+        settings = Self.loadSettings()
     }
 
     var isBusy: Bool { phase != .idle || processingEngine.isBusy }
@@ -134,19 +138,76 @@ final class CaptureViewModel {
     func changeLens(_ lens: CameraLens) {
         guard phase == .idle else { return }
         adminConfiguration.lens = lens
+        Self.persistConfiguration(adminConfiguration)
         Task { [adminConfiguration] in await engine.configure(adminConfiguration) }
     }
 
     func changeFrameRate(_ frameRate: CaptureFrameRate) {
         guard phase == .idle else { return }
         adminConfiguration.frameRate = frameRate
+        Self.persistConfiguration(adminConfiguration)
         Task { [adminConfiguration] in await engine.configure(adminConfiguration) }
     }
 
     func changeResolution(_ resolution: CaptureResolution) {
         guard phase == .idle else { return }
         adminConfiguration.resolution = resolution
+        Self.persistConfiguration(adminConfiguration)
         Task { [adminConfiguration] in await engine.configure(adminConfiguration) }
+    }
+
+    // MARK: - 拍摄页设置持久化
+    // 镜头/分辨率/帧率/倒数只在拍摄页调（活动模板不再管这些），重启 App 保持上次选择。
+
+    private enum PersistKey {
+        static let lens = "booth360.capture.lens"
+        static let resolution = "booth360.capture.resolution"
+        static let frameRate = "booth360.capture.frameRate"
+        static let countdown = "booth360.capture.countdown"
+        static let recordSeconds = "booth360.capture.recordSeconds"
+    }
+
+    private static func loadConfiguration() -> CameraConfiguration {
+        var config = CameraConfiguration.phase1Default
+        let defaults = UserDefaults.standard
+        if let raw = defaults.string(forKey: PersistKey.lens),
+           let lens = CameraLens(rawValue: raw) {
+            config.lens = lens
+        }
+        if let raw = defaults.string(forKey: PersistKey.resolution),
+           let resolution = CaptureResolution(rawValue: raw) {
+            config.resolution = resolution
+        }
+        if defaults.object(forKey: PersistKey.frameRate) != nil,
+           let rate = CaptureFrameRate(rawValue: defaults.integer(forKey: PersistKey.frameRate)) {
+            config.frameRate = rate
+        }
+        return config
+    }
+
+    private static func persistConfiguration(_ config: CameraConfiguration) {
+        let defaults = UserDefaults.standard
+        defaults.set(config.lens.rawValue, forKey: PersistKey.lens)
+        defaults.set(config.resolution.rawValue, forKey: PersistKey.resolution)
+        defaults.set(config.frameRate.rawValue, forKey: PersistKey.frameRate)
+    }
+
+    private static func loadSettings() -> RecordingSettings {
+        var settings = RecordingSettings()
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: PersistKey.countdown) != nil {
+            settings.countdownSeconds = defaults.integer(forKey: PersistKey.countdown)
+        }
+        if defaults.object(forKey: PersistKey.recordSeconds) != nil {
+            settings.recordingSeconds = defaults.integer(forKey: PersistKey.recordSeconds)
+        }
+        return settings
+    }
+
+    private static func persistSettings(_ settings: RecordingSettings) {
+        let defaults = UserDefaults.standard
+        defaults.set(settings.countdownSeconds, forKey: PersistKey.countdown)
+        defaults.set(settings.recordingSeconds, forKey: PersistKey.recordSeconds)
     }
 
     // MARK: - 拍摄流程

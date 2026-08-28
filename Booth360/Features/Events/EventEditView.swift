@@ -45,22 +45,8 @@ struct EventEditView: View {
                 fileAssetRow(title: "片尾视频（Outro）", value: event.outroFileName, kind: .outro)
             }
 
-            Section("拍摄参数") {
-                Picker("镜头", selection: $event.lensRawValue) {
-                    ForEach(CameraLens.allCases) { lens in
-                        Text(lens.displayName).tag(lens.rawValue)
-                    }
-                }
-                Picker("帧率（设备不支持时自动降级）", selection: $event.frameRateRawValue) {
-                    ForEach(CaptureFrameRate.allCases) { rate in
-                        Text(rate.displayName).tag(rate.rawValue)
-                    }
-                }
-                Picker("倒数", selection: $event.countdownSeconds) {
-                    ForEach(RecordingSettings.countdownChoices, id: \.self) { seconds in
-                        Text(seconds == 0 ? "不倒数" : "\(seconds) 秒").tag(seconds)
-                    }
-                }
+            // 镜头/帧率/倒数在拍摄页直接调（右上角光圈菜单 + 底部倒数胶囊），不进活动模板
+            Section("转台") {
                 Toggle("转台起转自动开拍", isOn: $event.motionTriggerEnabled)
                 Toggle("拍摄时蓝牙控制转台旋转", isOn: $event.turntableSpinEnabled)
             }
