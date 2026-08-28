@@ -69,7 +69,7 @@ enum WallPageTemplate {
                 gap:12px;min-height:0}
           .feat-hero .wcell{height:100%;min-height:0}
           .feat-hero .qrbox{width:clamp(84px,8vw,128px)}
-          .feat-strip{flex:1;display:flex;justify-content:center;align-items:flex-end;
+          .feat-strip{flex:.72;display:flex;justify-content:center;align-items:flex-end;
                 gap:clamp(10px,1.2vw,20px);min-height:0}
           .feat-strip .wcell{flex:0 1 auto;height:100%}
           .feat-strip .qrbox{width:clamp(64px,6.4vw,96px)}
@@ -94,10 +94,12 @@ enum WallPageTemplate {
           @keyframes cineProg{from{width:0}to{width:100%}}
 
           /* 右上角设置 */
-          #gear{position:fixed;top:14px;right:16px;z-index:9;font-size:24px;line-height:1;
-                color:#f2f5f9;opacity:.28;cursor:pointer;user-select:none;
-                transition:opacity .25s}
-          #gear:hover{opacity:.9}
+          /* 隐形设置热区：右上角 64px 可点，平时完全不可见，鼠标悬停才微微显形 */
+          #gear{position:fixed;top:0;right:0;z-index:9;width:64px;height:64px;
+                display:flex;align-items:center;justify-content:center;
+                font-size:24px;line-height:1;color:#f2f5f9;opacity:0;
+                cursor:pointer;user-select:none;transition:opacity .25s}
+          #gear:hover{opacity:.55}
           #panel{position:fixed;inset:0;z-index:20;display:none;align-items:center;
                 justify-content:center;background:rgba(0,0,0,.55)}
           #panel.open{display:flex}
@@ -270,9 +272,12 @@ enum WallPageTemplate {
             ? `<img src="${item.qrURL}" alt="QR">`
             : `<div class="pending">☁️<br>${item.state || "上传中"}</div>`;
         }
-        function cardHTML(item, i) {
-          return `<div class="wcell" style="--i:${i % 12}">
-            <video src="${item.videoURL}" autoplay muted loop playsinline preload="auto"></video>
+        function cardHTML(item, i, play = true) {
+          // play=false：只显示首帧不播放（#t=0.1 让浏览器 seek 到首帧），下排小卡用
+          const video = play
+            ? `<video src="${item.videoURL}" autoplay muted loop playsinline preload="auto"></video>`
+            : `<video src="${item.videoURL}#t=0.1" muted playsinline preload="metadata"></video>`;
+          return `<div class="wcell" style="--i:${i % 12}">${video}
             <div class="qrbox">${qrHTML(item)}</div></div>`;
         }
 
@@ -302,7 +307,7 @@ enum WallPageTemplate {
             stage.innerHTML =
               `<div class="feat-hero">${cardHTML(hero, 0)}</div>` +
               (rest.length
-                ? `<div class="feat-strip">${rest.map((x, i) => cardHTML(x, i + 1)).join("")}</div>`
+                ? `<div class="feat-strip">${rest.map((x, i) => cardHTML(x, i + 1, false)).join("")}</div>`
                 : "");
             // 下排放不下就少放几张（绝不切边）；视频尺寸要等元数据回来才定，多测几轮
             const strip = stage.querySelector(".feat-strip");
@@ -324,6 +329,15 @@ enum WallPageTemplate {
               renderCine();
             }, CINE_MS);
           }
+          nudgePlay();
+        }
+
+        /* 个别浏览器 innerHTML 注入后 autoplay 偶发不触发，补一脚 play() */
+        function nudgePlay() {
+          stage.querySelectorAll("video[autoplay]").forEach(v => {
+            const p = v.play();
+            if (p && p.catch) p.catch(() => {});
+          });
         }
 
         function renderCine() {
@@ -343,6 +357,7 @@ enum WallPageTemplate {
           } else {
             cineBar.style.display = "none";
           }
+          nudgePlay();
         }
 
         // —— 轮询 ——
