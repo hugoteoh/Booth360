@@ -44,6 +44,8 @@ final class CameraEngine {
     private(set) var manualLimits: ManualControlLimits = ManualControlLimits()
     /// 麦克风是否实际接入（权限被拒时为 false，仍可无声录制）。
     private(set) var audioEnabled: Bool = false
+    /// 当前防抖档位描述（"增强电影级"/"电影级"/…，永远自动开启）。
+    private(set) var stabilizationDescription: String = ""
 
     /// 预览层直接使用该 session。
     let session = AVCaptureSession()
@@ -93,6 +95,7 @@ final class CameraEngine {
                 self.didFallBackFrameRate = result.didFallBack
                 self.manualLimits = result.limits
                 self.audioEnabled = audioAllowed
+                self.stabilizationDescription = result.stabilization
                 self.activeFormatSummary =
                     "\(configuration.resolution.displayName) · \(Int(result.frameRate))FPS · \(configuration.lens.displayName)"
                 self.status = .running
@@ -111,6 +114,7 @@ final class CameraEngine {
         let frameRate: Double
         let didFallBack: Bool
         let limits: ManualControlLimits
+        let stabilization: String
     }
 
     private func performConfiguration(
@@ -211,25 +215,35 @@ final class CameraEngine {
             session.addOutput(movieOutput)
         }
 
-        // 视频防抖：按当前格式能力选最强档（cinematicExtended > cinematic > auto）。
-        // 部分高帧率格式不支持防抖，isVideoStabilizationSupported 会为 false，自动跳过。
+        // 视频防抖：按当前格式能力选最强档
+        // （增强电影级 iOS 17.2+ > 电影级 > cinematic > auto）。
+        // 部分高帧率格式不支持防抖，isVideoStabilizationSupported 为 false 时自动跳过。
+        var stabilizationText = "该格式不支持"
         if let connection = movieOutput.connection(with: .video),
            connection.isVideoStabilizationSupported {
-            if format.isVideoStabilizationModeSupported(.cinematicExtended) {
+            if #available(iOS 17.2, *),
+               format.isVideoStabilizationModeSupported(.cinematicExtendedEnhanced) {
+                connection.preferredVideoStabilizationMode = .cinematicExtendedEnhanced
+                stabilizationText = "增强电影级"
+            } else if format.isVideoStabilizationModeSupported(.cinematicExtended) {
                 connection.preferredVideoStabilizationMode = .cinematicExtended
+                stabilizationText = "电影级"
             } else if format.isVideoStabilizationModeSupported(.cinematic) {
                 connection.preferredVideoStabilizationMode = .cinematic
+                stabilizationText = "标准电影"
             } else {
                 connection.preferredVideoStabilizationMode = .auto
+                stabilizationText = "自动"
             }
-            AppLogger.camera.info("防抖模式: \(String(describing: connection.preferredVideoStabilizationMode.rawValue), privacy: .public)")
+            AppLogger.camera.info("防抖模式: \(stabilizationText, privacy: .public)")
         }
 
         activeSelection = (configuration, selection.frameRate)
         return ConfigurationResult(
             frameRate: selection.frameRate,
             didFallBack: selection.didFallBack,
-            limits: Self.limits(for: device)
+            limits: Self.limits(for: device),
+            stabilization: stabilizationText
         )
     }
 

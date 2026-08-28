@@ -145,6 +145,11 @@ struct CaptureView: View {
             VStack(spacing: 2) {
                 Text(engine.activeFormatSummary.isEmpty ? "—" : engine.activeFormatSummary)
                     .font(.caption.weight(.semibold))
+                if !engine.stabilizationDescription.isEmpty {
+                    Text("防抖 · \(engine.stabilizationDescription)")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
                 if engine.didFallBackFrameRate {
                     Text("帧率已降级（镜头不支持所选帧率）")
                         .font(.caption2)
