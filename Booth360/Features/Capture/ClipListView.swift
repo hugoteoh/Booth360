@@ -47,9 +47,16 @@ struct ClipListView: View {
                 Button {
                     if exists { playingURL = IdentifiableURL(url: url) }
                 } label: {
-                    Image(systemName: exists ? "play.circle.fill" : "questionmark.circle")
-                        .font(.title2)
-                        .foregroundStyle(exists ? Color.accentColor : .secondary)
+                    ZStack {
+                        VideoThumbnailView(url: url, width: 64, height: 114)
+                        if exists {
+                            Image(systemName: "play.fill")
+                                .font(.caption)
+                                .foregroundStyle(.white)
+                                .padding(6)
+                                .background(.black.opacity(0.45), in: Circle())
+                        }
+                    }
                 }
                 .buttonStyle(.borderless)
 

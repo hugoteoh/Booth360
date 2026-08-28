@@ -36,7 +36,7 @@ final class ThumbnailLoader {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 400, height: 400)
+        generator.maximumSize = CGSize(width: 600, height: 600)
         do {
             let (cgImage, _) = try await generator.image(at: .zero)
             let image = UIImage(cgImage: cgImage)
@@ -48,14 +48,17 @@ final class ThumbnailLoader {
     }
 }
 
-/// 通用缩略图视图（列表行用）。
+/// 通用缩略图视图（列表行用）。默认 9:16 竖版大图，一眼认出画面里是谁。
 struct VideoThumbnailView: View {
     let url: URL
+    var width: CGFloat = 76
+    var height: CGFloat = 135
+
     @State private var image: UIImage?
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.systemGray5))
             if let image {
                 Image(uiImage: image)
@@ -66,8 +69,8 @@ struct VideoThumbnailView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 56, height: 56)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .task(id: url) {
             image = await ThumbnailLoader.shared.thumbnail(for: url)
         }
