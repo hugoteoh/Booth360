@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 
 /// 拍摄主界面：全屏预览 + 顶部状态/镜头/帧率 + 底部拍摄控制。
 struct CaptureView: View {
@@ -8,6 +9,7 @@ struct CaptureView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(SystemStatusMonitor.self) private var monitor
+    @Environment(UploadQueue.self) private var uploadQueue
     @State private var showManualPanel = false
     /// 拍完点「处理/预览」直接跳编辑页。
     @State private var editingClip: SourceClip?
@@ -43,6 +45,30 @@ struct CaptureView: View {
                 }
             }
 
+            // 模板自动处理中（拍完 → 出成片前）
+            if viewModel.processingEngine.isBusy {
+                ZStack {
+                    Color.black.opacity(0.6).ignoresSafeArea()
+                    VStack(spacing: 18) {
+                        ProgressView(value: viewModel.processingEngine.progress)
+                            .progressViewStyle(.linear)
+                            .frame(width: 220)
+                            .tint(.white)
+                        Text(viewModel.processingEngine.stage.displayText)
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                        Text("\(Int(viewModel.processingEngine.progress * 100))%")
+                            .font(.title3.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.white)
+                        Button("取消") { viewModel.cancelProcessing() }
+                            .buttonStyle(.bordered)
+                            .tint(.white)
+                    }
+                    .padding(26)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                }
+            }
+
             if case .interrupted(let reason) = engine.status {
                 interruptedBanner(reason: reason)
             }
@@ -50,6 +76,7 @@ struct CaptureView: View {
         .statusBarHidden()
         .task {
             viewModel.modelContext = modelContext
+            viewModel.uploadQueue = uploadQueue
             if engine.status == .idle {
                 await viewModel.configureCamera()
             }
@@ -59,6 +86,13 @@ struct CaptureView: View {
         }
         .navigationDestination(item: $editingClip) { clip in
             EditView(clip: clip, storage: viewModel.storage)
+        }
+        .fullScreenCover(item: $viewModel.review) { review in
+            CaptureReviewSheet(
+                review: review,
+                onRetake: { viewModel.reviewRetake() },
+                onDone: { viewModel.reviewDone() }
+            )
         }
         .alert("出错了", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -352,6 +386,80 @@ struct CaptureView: View {
                 .background(.yellow, in: Capsule())
                 .padding(.top, 60)
             Spacer()
+        }
+    }
+}
+
+/// 成片确认弹层：模板自动处理后的最后一步——循环播放，重拍或完成。
+private struct CaptureReviewSheet: View {
+    let review: CaptureViewModel.ReviewPresentation
+    let onRetake: () -> Void
+    let onDone: () -> Void
+
+    @State private var player: AVPlayer?
+    @State private var loopObserver: NSObjectProtocol?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 14) {
+                Text("成片预览 · \(review.eventName)")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .padding(.top, 18)
+
+                VideoPlayer(player: player)
+                    .aspectRatio(9.0 / 16.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 18)
+
+                Text(review.render.settingsSummary)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+
+                HStack(spacing: 16) {
+                    Button {
+                        onRetake()
+                    } label: {
+                        Label("重拍", systemImage: "arrow.counterclockwise")
+                            .font(.headline)
+                            .frame(width: 140, height: 52)
+                            .background(.white.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.white)
+                    }
+                    Button {
+                        onDone()
+                    } label: {
+                        Label("完成", systemImage: "checkmark")
+                            .font(.headline)
+                            .frame(width: 140, height: 52)
+                            .background(Color.accentColor, in: Capsule())
+                            .foregroundStyle(.white)
+                    }
+                }
+                .padding(.bottom, 24)
+            }
+        }
+        .onAppear {
+            let player = AVPlayer(playerItem: review.playerItem)
+            self.player = player
+            loopObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: review.playerItem,
+                queue: .main
+            ) { _ in
+                player.seek(to: .zero)
+                player.play()
+            }
+            player.play()
+        }
+        .onDisappear {
+            player?.pause()
+            if let loopObserver {
+                NotificationCenter.default.removeObserver(loopObserver)
+            }
+            loopObserver = nil
         }
     }
 }

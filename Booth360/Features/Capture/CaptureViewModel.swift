@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import AVFoundation
 import Observation
 
 /// 拍摄流程状态机。
@@ -19,12 +20,22 @@ final class CaptureViewModel {
         case saving
     }
 
+    /// 成片确认弹层（模板自动处理完成后弹出）。
+    struct ReviewPresentation: Identifiable {
+        let id = UUID()
+        let playerItem: AVPlayerItem
+        let render: RenderedVideo
+        let eventName: String
+    }
+
     // MARK: - 状态
 
     private(set) var phase: Phase = .idle
     private(set) var recordingElapsedSeconds: Int = 0
-    /// 最近一次保存成功的片段（供 UI 弹提示）。
+    /// 最近一次保存成功的片段（仅在未设置当前活动的兜底路径显示）。
     private(set) var lastSavedClip: SourceClip?
+    /// 成片确认弹层。
+    var review: ReviewPresentation?
     var errorMessage: String?
 
     var settings = RecordingSettings()
@@ -32,6 +43,9 @@ final class CaptureViewModel {
 
     let engine: CameraEngine
     let storage: FileStorageService
+    /// 模板自动处理引擎（与嘉宾模式同款流程）。
+    let processingEngine = VideoProcessingEngine()
+    @ObservationIgnored var uploadQueue: UploadQueue?
 
     @ObservationIgnored var modelContext: ModelContext?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
@@ -44,7 +58,7 @@ final class CaptureViewModel {
         self.storage = storage
     }
 
-    var isBusy: Bool { phase != .idle }
+    var isBusy: Bool { phase != .idle || processingEngine.isBusy }
 
     // MARK: - 相机配置
 
@@ -73,7 +87,8 @@ final class CaptureViewModel {
     // MARK: - 拍摄流程
 
     func startTapped() {
-        guard phase == .idle, engine.status == .running else { return }
+        guard phase == .idle, !processingEngine.isBusy, review == nil,
+              engine.status == .running else { return }
         lastSavedClip = nil
         errorMessage = nil
 
@@ -122,8 +137,12 @@ final class CaptureViewModel {
             let info = try await engine.startRecording(to: url, maxSeconds: settings.recordingSeconds)
             elapsedTask?.cancel()
             phase = .saving
-            saveClipRecord(info)
+            let clip = saveClipRecord(info)
             phase = .idle
+            // 有「当前活动」→ 按模板自动处理并弹成片确认（与嘉宾模式同一逻辑）
+            if let clip {
+                await autoProcessWithActiveEvent(clip: clip, sourceURL: info.url)
+            }
         } catch {
             elapsedTask?.cancel()
             phase = .idle
@@ -143,10 +162,11 @@ final class CaptureViewModel {
         }
     }
 
-    private func saveClipRecord(_ info: RecordedClipInfo) {
+    @discardableResult
+    private func saveClipRecord(_ info: RecordedClipInfo) -> SourceClip? {
         guard let modelContext else {
             AppLogger.storage.error("modelContext 未注入，片段元数据未入库（文件已保留）")
-            return
+            return nil
         }
         let clip = SourceClip(
             fileName: info.url.lastPathComponent,
@@ -159,13 +179,84 @@ final class CaptureViewModel {
         modelContext.insert(clip)
         do {
             try modelContext.save()
-            lastSavedClip = clip
             AppLogger.storage.info("片段已入库: \(clip.fileName, privacy: .public)")
         } catch {
-            // 入库失败不丢文件：文件已在 SourceClips/，下版可做启动时目录扫描兜底
+            // 入库失败不丢文件：文件已在 SourceClips/，启动时 LibraryReconciler 会兜底补录
             AppLogger.storage.error("SwiftData 保存失败: \(error.localizedDescription, privacy: .public)")
             errorMessage = "片段文件已保存，但元数据入库失败：\(error.localizedDescription)"
         }
+        return clip
+    }
+
+    // MARK: - 模板自动处理（拍完 → 处理中 → 成片确认）
+
+    private func autoProcessWithActiveEvent(clip: SourceClip, sourceURL: URL) async {
+        guard let modelContext, let event = EventManager.activeEvent(in: modelContext) else {
+            // 没有当前活动：退回"已保存 + 处理/预览"手动入口
+            lastSavedClip = clip
+            return
+        }
+        let manager = EventManager(storage: storage)
+        let overlayImage = manager.loadImage(event: event, fileName: event.overlayFileName)
+        let musicURL = manager.musicURL(event: event)
+        var effect = event.effectSettings
+        effect.overlayEnabled = effect.overlayEnabled && overlayImage != nil
+        effect.musicEnabled = effect.musicEnabled && musicURL != nil
+
+        let outputURL = storage.newRenderURL()
+        do {
+            let result = try await processingEngine.export(VideoProcessingEngine.RenderRequest(
+                sourceURL: sourceURL,
+                settings: effect,
+                overlayImage: overlayImage?.cgImage,
+                overlayVideoURL: manager.overlayVideoURL(event: event),
+                musicURL: musicURL,
+                introURL: manager.introURL(event: event),
+                outroURL: manager.outroURL(event: event),
+                outputURL: outputURL
+            ))
+            let render = RenderedVideo(
+                fileName: result.outputURL.lastPathComponent,
+                durationSeconds: result.durationSeconds,
+                width: Int(result.renderSize.width),
+                height: Int(result.renderSize.height),
+                settingsSummary: effect.summaryText,
+                sourceClipID: clip.id,
+                eventID: event.id
+            )
+            modelContext.insert(render)
+            try? modelContext.save()
+            review = ReviewPresentation(
+                playerItem: AVPlayerItem(url: result.outputURL),
+                render: render,
+                eventName: event.name
+            )
+        } catch {
+            if (error as? ProcessingError) == .cancelled { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 成片确认：完成（保留；上传功能开着就自动进队列）。
+    func reviewDone() {
+        guard let review else { return }
+        if let uploadQueue, uploadQueue.isEnabled {
+            uploadQueue.enqueue(review.render)
+        }
+        self.review = nil
+    }
+
+    /// 成片确认：重拍（作废成品，源片保留）。
+    func reviewRetake() {
+        guard let review else { return }
+        storage.deleteFileIfExists(at: storage.renderURL(fileName: review.render.fileName))
+        modelContext?.delete(review.render)
+        try? modelContext?.save()
+        self.review = nil
+    }
+
+    func cancelProcessing() {
+        processingEngine.cancel()
     }
 
     // MARK: - 手动控制
