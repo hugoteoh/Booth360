@@ -9,6 +9,8 @@ struct CaptureView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(SystemStatusMonitor.self) private var monitor
     @State private var showManualPanel = false
+    /// 拍完点「处理/预览」直接跳编辑页。
+    @State private var editingClip: SourceClip?
 
     private var engine: CameraEngine { viewModel.engine }
 
@@ -54,6 +56,9 @@ struct CaptureView: View {
         }
         .sheet(isPresented: $showManualPanel) {
             ManualControlsPanel(viewModel: viewModel)
+        }
+        .navigationDestination(item: $editingClip) { clip in
+            EditView(clip: clip, storage: viewModel.storage)
         }
         .alert("出错了", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -203,13 +208,25 @@ struct CaptureView: View {
     private var bottomControls: some View {
         VStack(spacing: 14) {
             if let saved = viewModel.lastSavedClip {
-                Text("已保存 · \(saved.summaryText)")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.green.opacity(0.75), in: Capsule())
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                HStack(spacing: 10) {
+                    Text("已保存 · \(saved.summaryText)")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.green.opacity(0.75), in: Capsule())
+                    Button {
+                        editingClip = saved
+                    } label: {
+                        Label("处理 / 预览", systemImage: "wand.and.stars")
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color.accentColor, in: Capsule())
+                    }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             if viewModel.phase == .idle {
