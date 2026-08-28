@@ -154,7 +154,7 @@ struct AdminSettingsView: View {
             }
 
             Section("关于") {
-                LabeledContent("版本", value: "0.1.0 (Phase 3)")
+                LabeledContent("版本", value: Self.appVersionText)
             }
         }
         .navigationTitle("设置")
@@ -168,6 +168,13 @@ struct AdminSettingsView: View {
         } message: {
             Text(message ?? "")
         }
+    }
+
+    /// 真实版本号（构建时由 CI 自动注入，每次构建递增）。
+    static var appVersionText: String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return "v\(short) (build \(build))"
     }
 
     private var thermalText: String {

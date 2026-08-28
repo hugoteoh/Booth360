@@ -25,6 +25,12 @@ jobs:
       - name: 生成 Xcode 工程
         run: xcodegen generate
 
+      - name: 注入版本号（0.2.<构建序号>，App 设置页可见，每次构建自动递增）
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.2.${GITHUB_RUN_NUMBER}" Booth360/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" Booth360/Info.plist
+          echo "版本: 0.2.${GITHUB_RUN_NUMBER}"
+
       - name: 编译归档（不签名，签名在 Windows 端由 Sideloadly 完成）
         run: |
           set -o pipefail
@@ -60,7 +66,7 @@ jobs:
         run: |
           if gh release view latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload latest build/Booth360-unsigned.ipa --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit latest --notes "云端自动构建 · commit ${GITHUB_SHA:0:7} · $(date '+%Y-%m-%d %H:%M') UTC" --repo "$GITHUB_REPOSITORY"
+            gh release edit latest --title "Booth360 v0.2.${GITHUB_RUN_NUMBER}" --notes "云端自动构建 v0.2.${GITHUB_RUN_NUMBER} · commit ${GITHUB_SHA:0:7} · $(date '+%Y-%m-%d %H:%M') UTC（装好后在 App 设置→关于 核对此版本号）" --repo "$GITHUB_REPOSITORY"
           else
             gh release create latest build/Booth360-unsigned.ipa \
               --title "Booth360 最新构建" \
