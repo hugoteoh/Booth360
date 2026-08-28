@@ -69,7 +69,7 @@ enum WallPageTemplate {
                 gap:12px;min-height:0}
           .feat-hero .wcell{height:100%;min-height:0}
           .feat-hero .qrbox{width:clamp(84px,8vw,128px)}
-          .feat-strip{flex:.72;display:flex;justify-content:center;align-items:flex-end;
+          .feat-strip{flex:.45;display:flex;justify-content:center;align-items:flex-end;
                 gap:clamp(10px,1.2vw,20px);min-height:0}
           .feat-strip .wcell{flex:0 1 auto;height:100%}
           .feat-strip .qrbox{width:clamp(64px,6.4vw,96px)}
