@@ -3,9 +3,7 @@ import Foundation
 /// 拍摄模式（多段变速曲线库，对标市面 360 软件的"拍摄选项"）。
 /// 曲线用「片段操作」描述：正放/倒放 × 源片区间 × 速率，TimelineBuilder 据此展开。
 enum ShotModeKind: String, CaseIterable, Identifiable, Codable {
-    case normal          // 原速
-    case boomerang       // 回旋视频
-    case slowMotion      // 慢动作
+    case slowFastSlow    // 慢-快-慢（经典 360 节奏）
     case slowGlide       // 缓慢滑行 常-慢-常
     case rapidFade       // 极速淡化 常-快-慢
     case fastFlow        // 快速流动 快-慢-常
@@ -17,9 +15,7 @@ enum ShotModeKind: String, CaseIterable, Identifiable, Codable {
 
     var displayName: String {
         switch self {
-        case .normal: return "标准"
-        case .boomerang: return "回旋视频"
-        case .slowMotion: return "慢动作"
+        case .slowFastSlow: return "慢-快-慢"
         case .slowGlide: return "缓慢滑行"
         case .rapidFade: return "极速淡化"
         case .fastFlow: return "快速流动"
@@ -31,9 +27,7 @@ enum ShotModeKind: String, CaseIterable, Identifiable, Codable {
 
     var curveDescription: String {
         switch self {
-        case .normal: return "常速"
-        case .boomerang: return "正放 + 倒放"
-        case .slowMotion: return "全程慢动作"
+        case .slowFastSlow: return "慢 - 快 - 慢"
         case .slowGlide: return "常 - 慢 - 常"
         case .rapidFade: return "常 - 快 - 慢"
         case .fastFlow: return "快 - 慢 - 常"
@@ -45,9 +39,7 @@ enum ShotModeKind: String, CaseIterable, Identifiable, Codable {
 
     var sfSymbol: String {
         switch self {
-        case .normal: return "video"
-        case .boomerang: return "arrow.triangle.2.circlepath"
-        case .slowMotion: return "tortoise"
+        case .slowFastSlow: return "waveform.path.ecg"
         case .slowGlide: return "water.waves"
         case .rapidFade: return "wind"
         case .fastFlow: return "hare"
@@ -60,7 +52,7 @@ enum ShotModeKind: String, CaseIterable, Identifiable, Codable {
     /// 曲线中含倒放片段（需要先生成倒放素材）。
     var usesReverse: Bool {
         switch self {
-        case .boomerang, .rushback, .reverseSprint, .elasticLoop: return true
+        case .rushback, .reverseSprint, .elasticLoop: return true
         default: return false
         }
     }
@@ -83,12 +75,8 @@ enum ShotModeKind: String, CaseIterable, Identifiable, Codable {
     /// 曲线定义（区间按源片比例）。
     var ops: [Op] {
         switch self {
-        case .normal:
-            return [Op(0, 1, rate: 1)]
-        case .slowMotion:
-            return [Op(0, 1, rate: 0.5)]
-        case .boomerang:
-            return [Op(0, 1, rate: 1), Op(0, 1, rate: 1, reversed: true)]
+        case .slowFastSlow:   // 慢-快-慢
+            return [Op(0, 0.25, rate: 0.5), Op(0.25, 0.75, rate: 2), Op(0.75, 1, rate: 0.5)]
         case .slowGlide:      // 常-慢-常
             return [Op(0, 1.0/3, rate: 1), Op(1.0/3, 2.0/3, rate: 0.5), Op(2.0/3, 1, rate: 1)]
         case .rapidFade:      // 常-快-慢
@@ -120,6 +108,9 @@ enum ShotModeKind: String, CaseIterable, Identifiable, Codable {
     }
 
     var defaultSeconds: Int { 10 }
+
+    /// 模式录制时长的可选范围（秒）。
+    static let secondsRange = 5...20
 }
 
 /// 活动里可配置的一个拍摄模式条目（启用与否 + 该模式的录制时长）。
@@ -129,7 +120,7 @@ struct ShotMode: Codable, Equatable, Identifiable {
     var enabled: Bool
     var recordingSeconds: Int
 
-    var kind: ShotModeKind { ShotModeKind(rawValue: kindRaw) ?? .normal }
+    var kind: ShotModeKind { ShotModeKind(rawValue: kindRaw) ?? .slowFastSlow }
 
     init(kind: ShotModeKind, enabled: Bool, recordingSeconds: Int? = nil) {
         self.kindRaw = kind.rawValue
@@ -137,11 +128,19 @@ struct ShotMode: Codable, Equatable, Identifiable {
         self.recordingSeconds = recordingSeconds ?? kind.defaultSeconds
     }
 
-    /// 默认模式库（新活动的初始配置，勾选四个常用的）。
+    /// 默认模式库（新活动的初始配置）。
     static var defaultLibrary: [ShotMode] {
         ShotModeKind.allCases.map { kind in
-            let enabledByDefault: Set<ShotModeKind> = [.boomerang, .slowGlide, .fastFlow, .rushback]
+            let enabledByDefault: Set<ShotModeKind> = [.slowFastSlow, .slowGlide, .fastFlow, .rushback]
             return ShotMode(kind: kind, enabled: enabledByDefault.contains(kind))
+        }
+    }
+
+    /// 老数据迁移：丢弃已下架的模式、补齐新增的模式，顺序对齐当前库。
+    static func migrated(from saved: [ShotMode]) -> [ShotMode] {
+        let defaults = defaultLibrary
+        return defaults.map { entry in
+            saved.first { $0.kindRaw == entry.kindRaw } ?? entry
         }
     }
 }

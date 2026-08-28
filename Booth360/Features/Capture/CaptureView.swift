@@ -71,10 +71,22 @@ struct CaptureView: View {
                 }
             }
 
+            // 成片确认（拍摄页内覆盖层，不走系统弹层——弹层在处理结束的瞬间可能被吞掉）
+            if let review = viewModel.review {
+                CaptureReviewSheet(
+                    review: review,
+                    onRetake: { viewModel.reviewRetake() },
+                    onDone: { viewModel.reviewDone() }
+                )
+                .transition(.opacity)
+                .zIndex(10)
+            }
+
             if case .interrupted(let reason) = engine.status {
                 interruptedBanner(reason: reason)
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: viewModel.review != nil)
         .statusBarHidden()
         .task {
             viewModel.modelContext = modelContext
@@ -96,13 +108,6 @@ struct CaptureView: View {
         }
         .navigationDestination(item: $editingClip) { clip in
             EditView(clip: clip, storage: viewModel.storage)
-        }
-        .fullScreenCover(item: $viewModel.review) { review in
-            CaptureReviewSheet(
-                review: review,
-                onRetake: { viewModel.reviewRetake() },
-                onDone: { viewModel.reviewDone() }
-            )
         }
         .alert("出错了", isPresented: Binding(
             get: { viewModel.errorMessage != nil },

@@ -94,7 +94,7 @@ extension EventTemplate {
         RecordingSettings(countdownSeconds: countdownSeconds, recordingSeconds: recordingSeconds)
     }
 
-    /// 拍摄模式列表（解码失败/未配置回落默认库）。
+    /// 拍摄模式列表（解码失败/未配置回落默认库；老数据自动迁移到当前模式清单）。
     var shotModes: [ShotMode] {
         get {
             guard !shotModesData.isEmpty,
@@ -102,7 +102,7 @@ extension EventTemplate {
                   !modes.isEmpty else {
                 return ShotMode.defaultLibrary
             }
-            return modes
+            return ShotMode.migrated(from: modes)
         }
         set {
             shotModesData = (try? JSONEncoder().encode(newValue)) ?? shotModesData

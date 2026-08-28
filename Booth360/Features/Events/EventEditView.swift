@@ -60,11 +60,6 @@ struct EventEditView: View {
                         Text(seconds == 0 ? "不倒数" : "\(seconds) 秒").tag(seconds)
                     }
                 }
-                Picker("录制时长", selection: $event.recordingSeconds) {
-                    ForEach(RecordingSettings.durationChoices, id: \.self) { seconds in
-                        Text("\(seconds) 秒").tag(seconds)
-                    }
-                }
                 Toggle("转台起转自动开拍", isOn: $event.motionTriggerEnabled)
                 Toggle("拍摄时蓝牙控制转台旋转", isOn: $event.turntableSpinEnabled)
             }
@@ -81,7 +76,7 @@ struct EventEditView: View {
                             }
                         }
                         Menu {
-                            ForEach([5, 10, 15, 20, 30], id: \.self) { seconds in
+                            ForEach(Array(ShotModeKind.secondsRange), id: \.self) { seconds in
                                 Button("\(seconds) 秒") { mode.recordingSeconds = seconds }
                             }
                         } label: {
@@ -100,13 +95,6 @@ struct EventEditView: View {
             }
 
             Section("效果参数") {
-                Picker("变速", selection: $effectDraft.speed) {
-                    ForEach(SpeedEffect.allCases) { Text($0.displayName).tag($0) }
-                }
-                Picker("播放方式", selection: $effectDraft.style) {
-                    ForEach(PlaybackStyle.allCases) { Text($0.displayName).tag($0) }
-                }
-                Stepper("循环 ×\(effectDraft.loopCount)", value: $effectDraft.loopCount, in: 1...3)
                 Toggle("美颜（磨皮 · 柔光 · 提亮）", isOn: $effectDraft.beautyEnabled)
                 if effectDraft.beautyEnabled {
                     VStack(alignment: .leading, spacing: 4) {

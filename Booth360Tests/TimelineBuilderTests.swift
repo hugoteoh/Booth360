@@ -133,6 +133,21 @@ final class TimelineBuilderTests: XCTestCase {
         XCTAssertFalse(library.filter(\.enabled).isEmpty)
     }
 
+    func testShotModeMigrationDropsRemovedAndKeepsUserConfig() {
+        // 用户已保存的配置（急速回冲改成了 7 秒并启用）+ 一条已下架的模式
+        var saved = [ShotMode(kind: .rushback, enabled: true, recordingSeconds: 7)]
+        var ghost = ShotMode(kind: .slowGlide, enabled: true)
+        ghost.kindRaw = "boomerang" // 旧版本存在、现已移除
+        saved.append(ghost)
+
+        let migrated = ShotMode.migrated(from: saved)
+        XCTAssertEqual(migrated.count, ShotModeKind.allCases.count, "补齐当前全部模式")
+        XCTAssertFalse(migrated.contains { $0.kindRaw == "boomerang" }, "下架模式被丢弃")
+        XCTAssertEqual(migrated.first { $0.kind == .rushback }?.recordingSeconds, 7, "用户设置保留")
+        XCTAssertEqual(migrated.first { $0.kind == .rushback }?.enabled, true)
+        XCTAssertTrue(migrated.contains { $0.kind == .slowFastSlow }, "新增的慢-快-慢在列")
+    }
+
     func testZeroDurationProducesNothing() {
         XCTAssertTrue(TimelineBuilder.build(
             clipDurationSeconds: 0, effect: .slowMotion, style: .boomerang, loopCount: 2).isEmpty)
