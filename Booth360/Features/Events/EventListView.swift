@@ -14,6 +14,8 @@ struct EventListView: View {
     /// 编辑页改为程序化跳转，避免 NavigationLink 内嵌 ▶ 按钮导致
     /// push 与 fullScreenCover 同时触发把界面卡死（黑屏）。
     @State private var editingEvent: EventTemplate?
+    /// 列表编辑模式（显式删除入口；左滑删除仍然可用）。
+    @State private var editMode: EditMode = .inactive
 
     private var manager: EventManager { EventManager(storage: storage) }
 
@@ -33,12 +35,24 @@ struct EventListView: View {
                     ForEach(events) { event in
                         eventRow(event)
                     }
+                    .onDelete { indexSet in
+                        for index in indexSet {
+                            manager.delete(events[index], in: modelContext)
+                        }
+                        activeEventID = EventManager.activeEventID
+                    }
                 }
+                .environment(\.editMode, $editMode)
             }
         }
         .navigationTitle("活动")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if !events.isEmpty {
+                    Button(editMode == .active ? "完成" : "编辑") {
+                        withAnimation { editMode = editMode == .active ? .inactive : .active }
+                    }
+                }
                 Button {
                     createEvent()
                 } label: {
@@ -105,6 +119,25 @@ struct EventListView: View {
                 Label("设为当前", systemImage: "checkmark.circle")
             }
             .tint(.blue)
+        }
+        .contextMenu {
+            Button {
+                EventManager.activeEventID = event.id
+                activeEventID = event.id
+            } label: {
+                Label("设为当前", systemImage: "checkmark.circle")
+            }
+            Button {
+                manager.duplicate(event, in: modelContext)
+            } label: {
+                Label("复制", systemImage: "doc.on.doc")
+            }
+            Button(role: .destructive) {
+                manager.delete(event, in: modelContext)
+                activeEventID = EventManager.activeEventID
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
         }
     }
 
