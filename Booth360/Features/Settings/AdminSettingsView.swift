@@ -114,9 +114,12 @@ struct AdminSettingsView: View {
             }
 
             Section {
-                Toggle("局域网控制", isOn: Binding(
+                Toggle("局域网控制（默认常开）", isOn: Binding(
                     get: { lanServer.isRunning },
-                    set: { $0 ? lanServer.start() : lanServer.stop() }
+                    set: { on in
+                        LANControlServer.autoStartEnabled = on
+                        on ? lanServer.start() : lanServer.stop()
+                    }
                 ))
                 if lanServer.isRunning, let url = lanServer.displayURL {
                     LabeledContent("控制台地址", value: url)

@@ -13,6 +13,7 @@ struct RootView: View {
     let turntable: TurntableService
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @State private var guestEvent: EventTemplate?
 
     var body: some View {
@@ -44,8 +45,16 @@ struct RootView: View {
             systemMonitor.start()
             uploadQueue.resumePendingOnLaunch()
             wireLANServer()
+            // 局域网控制默认常开：启动即拉起，无需每次手动打开
+            if LANControlServer.autoStartEnabled { lanServer.start() }
             // 兜底：为“文件在、记录丢”的孤儿视频补建数据库记录
             await LibraryReconciler.reconcile(storage: storage, context: modelContext)
+        }
+        // 回到前台时若服务器被系统挂起断掉，自动恢复
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, LANControlServer.autoStartEnabled, !lanServer.isRunning {
+                lanServer.start()
+            }
         }
     }
 

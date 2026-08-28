@@ -31,6 +31,16 @@ final class LANControlServer {
     private(set) var displayURL: String?
     private(set) var lastError: String?
 
+    /// 自动开启偏好（默认开）：App 启动 / 回到前台时按它自动拉起服务器，
+    /// 设置页的开关改的就是这个值——关掉后不再自动开。
+    static var autoStartEnabled: Bool {
+        get {
+            UserDefaults.standard.object(forKey: "booth360.lan.autoStart") == nil
+                || UserDefaults.standard.bool(forKey: "booth360.lan.autoStart")
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "booth360.lan.autoStart") }
+    }
+
     @ObservationIgnored var handlers: Handlers?
     @ObservationIgnored private var listener: NWListener?
 
