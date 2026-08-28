@@ -221,7 +221,7 @@ final class CameraEngine {
         var stabilizationText = "该格式不支持"
         if let connection = movieOutput.connection(with: .video),
            connection.isVideoStabilizationSupported {
-            if #available(iOS 17.2, *),
+            if #available(iOS 18.0, *),
                format.isVideoStabilizationModeSupported(.cinematicExtendedEnhanced) {
                 connection.preferredVideoStabilizationMode = .cinematicExtendedEnhanced
                 stabilizationText = "增强电影级"
