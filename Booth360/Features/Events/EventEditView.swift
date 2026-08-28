@@ -30,8 +30,6 @@ struct EventEditView: View {
         Form {
             Section("基本信息") {
                 TextField("活动名称", text: $event.name)
-                TextField("欢迎标题", text: $event.welcomeTitle)
-                TextField("欢迎副标题", text: $event.welcomeSubtitle)
                 Stepper("成品页 \(event.autoReturnSeconds)s 后自动返回",
                         value: $event.autoReturnSeconds, in: 5...120, step: 5)
             }
