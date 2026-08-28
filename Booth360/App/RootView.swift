@@ -123,9 +123,10 @@ struct RootView: View {
                     ]
                 }
             },
-            videoData: { id in
+            videoFileURL: { id in
                 guard let render = Self.fetchRender(id: id, in: modelContext) else { return nil }
-                return try? Data(contentsOf: storage.renderURL(fileName: render.fileName))
+                let url = storage.renderURL(fileName: render.fileName)
+                return storage.fileExists(at: url) ? url : nil
             },
             qrPNG: { id in
                 guard let render = Self.fetchRender(id: id, in: modelContext),

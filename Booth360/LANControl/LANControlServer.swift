@@ -19,8 +19,8 @@ final class LANControlServer {
         var startCapture: () -> Bool
         /// 大屏页数据：成品列表（新→旧，含上传状态与下载链接）。
         var renders: () -> [[String: Any]]
-        /// 按成品 id 取视频文件内容（大屏局域网直播放，不等云端）。
-        var videoData: (UUID) -> Data?
+        /// 按成品 id 取视频文件路径（大屏局域网分块流式播放，不等云端）。
+        var videoFileURL: (UUID) -> URL?
         /// 按成品 id 生成下载二维码 PNG（remoteURL 就绪后才有）。
         var qrPNG: (UUID) -> Data?
     }
@@ -110,6 +110,14 @@ final class LANControlServer {
                 // 头部收全（\r\n\r\n）即可路由；控制台请求无 body
                 if let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) {
                     let headText = String(data: buffer[..<headerEnd.lowerBound], encoding: .utf8) ?? ""
+                    // 视频走分块流式（多格视频墙并发拉流，整文件读内存会爆）
+                    if let request = HTTPRequestParser.parse(headText),
+                       request.method == "GET", request.path.hasPrefix("/video/"),
+                       let id = UUID(uuidString: String(request.path.dropFirst("/video/".count))),
+                       let fileURL = self.handlers?.videoFileURL(id) {
+                        self.sendFile(fileURL, contentType: "video/mp4", on: connection)
+                        return
+                    }
                     let response = self.route(headText)
                     self.send(response, on: connection)
                 } else if isComplete || buffer.count > 128 * 1024 {
@@ -119,6 +127,51 @@ final class LANControlServer {
                 }
             }
         }
+    }
+
+    /// 分块流式发送文件（1MB/块），峰值内存与并发数无关。
+    private func sendFile(_ fileURL: URL, contentType: String, on connection: NWConnection) {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+              let size = (attrs[.size] as? NSNumber)?.int64Value,
+              let handle = try? FileHandle(forReadingFrom: fileURL) else {
+            send(("404 Not Found", "text/plain", Data("no file".utf8)), on: connection)
+            return
+        }
+        var head = "HTTP/1.1 200 OK\r\n"
+        head += "Content-Type: \(contentType)\r\n"
+        head += "Content-Length: \(size)\r\n"
+        head += "Access-Control-Allow-Origin: *\r\n"
+        head += "Connection: close\r\n\r\n"
+        connection.send(content: Data(head.utf8), completion: .contentProcessed { [weak self] error in
+            Task { @MainActor [weak self] in
+                if error != nil {
+                    try? handle.close()
+                    connection.cancel()
+                    return
+                }
+                self?.streamNextChunk(handle: handle, connection: connection)
+            }
+        })
+    }
+
+    private func streamNextChunk(handle: FileHandle, connection: NWConnection) {
+        let chunk = try? handle.read(upToCount: 1_048_576)
+        guard let chunk, !chunk.isEmpty else {
+            try? handle.close()
+            connection.send(content: nil, contentContext: .finalMessage, isComplete: true,
+                            completion: .contentProcessed { _ in connection.cancel() })
+            return
+        }
+        connection.send(content: chunk, completion: .contentProcessed { [weak self] error in
+            Task { @MainActor [weak self] in
+                if error != nil {
+                    try? handle.close()
+                    connection.cancel()
+                    return
+                }
+                self?.streamNextChunk(handle: handle, connection: connection)
+            }
+        })
     }
 
     private func send(_ response: (status: String, contentType: String, body: Data), on connection: NWConnection) {
@@ -149,13 +202,6 @@ final class LANControlServer {
 
         case ("GET", "/api/renders"):
             return jsonArray(handlers?.renders() ?? [])
-
-        case ("GET", let path) where path.hasPrefix("/video/"):
-            guard let id = UUID(uuidString: String(path.dropFirst("/video/".count))),
-                  let data = handlers?.videoData(id) else {
-                return ("404 Not Found", "text/plain", Data("no video".utf8))
-            }
-            return ("200 OK", "video/mp4", data)
 
         case ("GET", let path) where path.hasPrefix("/qr/"):
             guard let id = UUID(uuidString: String(path.dropFirst("/qr/".count))),
