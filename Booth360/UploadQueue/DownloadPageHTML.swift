@@ -8,8 +8,7 @@ import Foundation
 /// - 视频链接 7 天有效，过期显示友好提示（页面本身地址永久）
 enum DownloadPageHTML {
 
-    static func html(videoURL: String, title: String, brandName: String) -> String {
-        let brand = brandName.isEmpty ? "BOOTH360" : brandName
+    static func html(videoURL: String, title: String) -> String {
         return """
         <!DOCTYPE html>
         <html lang="zh-CN">
@@ -23,20 +22,19 @@ enum DownloadPageHTML {
                  font-family:-apple-system,"Microsoft YaHei",sans-serif;
                  display:flex; flex-direction:column; align-items:center; justify-content:center;
                  padding:14px 16px calc(16px + env(safe-area-inset-bottom)); }
-          .brand { color:#888; font-size:12px; letter-spacing:.3em; margin-bottom:12px; }
           .vwrap { width:100%; max-width:560px; display:flex; justify-content:center; }
-          video { width:100%; max-height:66vh; background:#000;
-                  border:1px solid rgba(255,255,255,.14); object-fit:contain; }
+          video { display:block; max-width:100%; max-height:66vh; background:#000; }
           .btns { width:100%; max-width:560px; margin-top:14px; }
           .btns a { display:flex; align-items:center; justify-content:center; height:50px;
-                    background:linear-gradient(135deg,#ff3c78,#ffa028); color:#fff;
-                    font-weight:700; font-size:15px; letter-spacing:.15em; text-decoration:none; }
+                    background:#fff; color:#000; border-radius:14px;
+                    font-weight:600; font-size:16px; letter-spacing:.05em; text-decoration:none;
+                    -webkit-tap-highlight-color:transparent; }
+          .btns a:active { opacity:.7; }
           #videoError { display:none; color:#f4c542; font-size:14px; line-height:1.7;
                         text-align:center; margin-top:16px; max-width:400px; }
         </style>
         </head>
         <body>
-        <div class="brand">\(brand)</div>
         <div class="vwrap" id="vwrap">
           <video id="video" src="\(videoURL)" controls autoplay muted loop playsinline preload="metadata"></video>
         </div>

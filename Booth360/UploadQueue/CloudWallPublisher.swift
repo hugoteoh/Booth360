@@ -34,7 +34,6 @@ enum CloudWallPublisher {
             // 每次发布对全部条目重新签名 + 重生成二维码：链接永远新鲜（各 7 天有效期从现在起算）
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
-            let brandName = AccountStore.load().studioName
             var jsonItems: [[String: Any]] = []
             for item in items {
                 let baseKey = "booth360/\(item.id.uuidString.lowercased())"
@@ -57,8 +56,7 @@ enum CloudWallPublisher {
                 )
                 let landingHTML = DownloadPageHTML.html(
                     videoURL: videoURL.absoluteString,
-                    title: "你的 360 视频",
-                    brandName: brandName
+                    title: "你的 360 视频"
                 )
                 try await putPublicObject(
                     data: Data(landingHTML.utf8),

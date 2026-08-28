@@ -183,8 +183,7 @@ struct TencentCOSBackend: UploadBackend {
         let baseKey = objectKey.split(separator: "/").dropLast().joined(separator: "/")
         let landingHTML = DownloadPageHTML.html(
             videoURL: videoGET.absoluteString,
-            title: "你的 360 视频",
-            brandName: AccountStore.load().studioName
+            title: "你的 360 视频"
         )
         do {
             try await CloudWallPublisher.putPublicObject(
