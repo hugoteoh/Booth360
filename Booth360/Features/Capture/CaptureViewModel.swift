@@ -30,12 +30,16 @@ final class CaptureViewModel {
 
     // MARK: - 状态
 
-    private(set) var phase: Phase = .idle
+    private(set) var phase: Phase = .idle {
+        didSet { updateAutomation() }
+    }
     private(set) var recordingElapsedSeconds: Int = 0
     /// 最近一次保存成功的片段（仅在未设置当前活动的兜底路径显示）。
     private(set) var lastSavedClip: SourceClip?
     /// 成片确认弹层。
-    var review: ReviewPresentation?
+    var review: ReviewPresentation? {
+        didSet { updateAutomation() }
+    }
     var errorMessage: String?
 
     var settings = RecordingSettings()
@@ -45,7 +49,13 @@ final class CaptureViewModel {
     let storage: FileStorageService
     /// 模板自动处理引擎（与嘉宾模式同款流程）。
     let processingEngine = VideoProcessingEngine()
+    /// 转台起转自动开拍（当前活动开了开关时，待机状态监听）。
+    let motionTrigger = MotionTriggerService()
     @ObservationIgnored var uploadQueue: UploadQueue?
+    /// 蓝牙转台（当前活动开了旋转开关时：录制开始转、录完停）。
+    @ObservationIgnored weak var turntable: TurntableService?
+    /// 远程控制桥（电脑控制台看状态 / 远程开拍）。
+    @ObservationIgnored weak var hub: RemoteControlHub?
 
     @ObservationIgnored var modelContext: ModelContext?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
@@ -64,6 +74,41 @@ final class CaptureViewModel {
 
     func configureCamera() async {
         await engine.configure(adminConfiguration)
+        motionTrigger.onTrigger = { [weak self] in self?.startTapped() }
+        updateAutomation()
+    }
+
+    /// 按「当前活动」的开关同步自动化：Motion Trigger 待机监听、转台预连、远程状态回写。
+    private func updateAutomation() {
+        let event = modelContext.flatMap { EventManager.activeEvent(in: $0) }
+
+        if phase == .idle, review == nil, !processingEngine.isBusy,
+           event?.motionTriggerEnabled == true, engine.status == .running {
+            motionTrigger.start()
+        } else {
+            motionTrigger.stop()
+        }
+
+        if event?.turntableSpinEnabled == true {
+            turntable?.reconnectRememberedIfNeeded()
+        }
+
+        // 电脑控制台的状态行（嘉宾模式开着时由嘉宾流程接管）
+        if hub?.guestActive != true {
+            hub?.guestPhaseText = Self.phaseText(phase: phase, review: review != nil,
+                                                 processing: processingEngine.isBusy)
+        }
+    }
+
+    private static func phaseText(phase: Phase, review: Bool, processing: Bool) -> String {
+        if review { return "确认成片中" }
+        if processing { return "处理中" }
+        switch phase {
+        case .idle: return "待机"
+        case .countingDown(let n): return "倒数 \(n)"
+        case .recording: return "录制中"
+        case .saving: return "保存中"
+        }
     }
 
     func changeLens(_ lens: CameraLens) {
@@ -127,6 +172,10 @@ final class CaptureViewModel {
     private func beginRecording() async {
         let url = storage.newSourceClipURL()
         recordingElapsedSeconds = 0
+        // 当前活动开了转台旋转 → 录制起转、录完停
+        let spinEnabled = modelContext
+            .flatMap { EventManager.activeEvent(in: $0) }?.turntableSpinEnabled == true
+        if spinEnabled { turntable?.sendStart() }
         phase = .recording
         startElapsedTicker()
 
@@ -135,6 +184,7 @@ final class CaptureViewModel {
 
         do {
             let info = try await engine.startRecording(to: url, maxSeconds: settings.recordingSeconds)
+            if spinEnabled { turntable?.sendStop() }
             elapsedTask?.cancel()
             phase = .saving
             let clip = saveClipRecord(info)
@@ -144,6 +194,7 @@ final class CaptureViewModel {
                 await autoProcessWithActiveEvent(clip: clip, sourceURL: info.url)
             }
         } catch {
+            if spinEnabled { turntable?.sendStop() }
             elapsedTask?.cancel()
             phase = .idle
             storage.deleteFileIfExists(at: url)

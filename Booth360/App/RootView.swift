@@ -102,7 +102,7 @@ struct RootView: View {
                 return true
             },
             startCapture: {
-                guard remoteHub.guestActive else { return false }
+                // 嘉宾模式开着由嘉宾流程响应，否则主拍摄页响应
                 remoteHub.requestStart()
                 return true
             },

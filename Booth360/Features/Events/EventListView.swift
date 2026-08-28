@@ -80,20 +80,8 @@ struct EventListView: View {
             }
             .buttonStyle(.plain)
 
-            // 右侧：独立的 ▶ 启动嘉宾模式（与编辑跳转完全分离）
-            Button {
-                EventManager.activeEventID = event.id
-                activeEventID = event.id
-                onLaunchGuestMode(event)
-            } label: {
-                Image(systemName: "play.rectangle.on.rectangle.fill")
-                    .font(.title3)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("启动嘉宾模式")
-
+            // 嘉宾模式入口已按用户要求收起（主页即完整流程）；
+            // 如需恢复客人自助 Kiosk 模式，把 ▶ 按钮加回这里即可。
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)

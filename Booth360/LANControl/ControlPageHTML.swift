@@ -68,7 +68,7 @@ enum ControlPageHTML {
       try {
         const status = await (await fetch('/api/status')).json();
         document.getElementById('status').textContent =
-          '嘉宾模式：' + (status.guestActive ? '运行中 · ' + status.guestPhase : '未开启') + '\\n' +
+          '拍摄状态：' + status.guestPhase + (status.guestActive ? '（嘉宾模式）' : '') + '\\n' +
           '当前活动：' + (status.activeEvent || '未设置') + '\\n' +
           '剩余存储：' + status.storageGB + ' GB · 电量：' + status.battery + '\\n' +
           '上传队列：待传 ' + status.uploadsPending + ' · 失败 ' + status.uploadsFailed;

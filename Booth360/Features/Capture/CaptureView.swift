@@ -10,6 +10,8 @@ struct CaptureView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(SystemStatusMonitor.self) private var monitor
     @Environment(UploadQueue.self) private var uploadQueue
+    @Environment(RemoteControlHub.self) private var hub
+    @Environment(TurntableService.self) private var turntable
     @State private var showManualPanel = false
     /// 拍完点「处理/预览」直接跳编辑页。
     @State private var editingClip: SourceClip?
@@ -77,8 +79,16 @@ struct CaptureView: View {
         .task {
             viewModel.modelContext = modelContext
             viewModel.uploadQueue = uploadQueue
+            viewModel.hub = hub
+            viewModel.turntable = turntable
             if engine.status == .idle {
                 await viewModel.configureCamera()
+            }
+        }
+        // 电脑控制台「开始拍摄」→ 触发主页快门（嘉宾模式开着时由嘉宾流程响应）
+        .onChange(of: hub.startRequestID) { _, _ in
+            if !hub.guestActive {
+                viewModel.startTapped()
             }
         }
         .sheet(isPresented: $showManualPanel) {
