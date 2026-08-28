@@ -68,7 +68,9 @@ enum WallPageTemplate {
           .feat-hero{flex:1.6;display:flex;justify-content:center;align-items:flex-end;
                 gap:12px;min-height:0}
           .feat-hero .wcell{height:100%;min-height:0}
-          .feat-hero .qrbox{width:clamp(84px,8vw,128px)}
+          /* 二维码绝对定位挂在视频右侧：视频本体严格屏幕居中，不被二维码挤偏 */
+          .feat-hero .qrbox{width:clamp(84px,8vw,128px);position:absolute;
+                left:100%;bottom:8px;margin-left:14px}
           .feat-strip{flex:.45;display:flex;justify-content:space-evenly;align-items:flex-end;
                 gap:clamp(10px,1.2vw,20px);min-height:0}
           .feat-strip .wcell{flex:0 1 auto;height:100%}
