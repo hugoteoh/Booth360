@@ -509,14 +509,21 @@ final class CameraEngine {
         })
     }
 
-    /// 会话已配置但未在运行时（中断结束/回到前台），尝试恢复。
+    /// 中断结束/回到前台时恢复。
+    /// 注意：后台中断时系统可能自动恢复会话（isRunning 一直为 true），
+    /// 此时也必须把 status 从 interrupted 刷回 running，否则 UI 永远停在"已暂停"。
     private func resumeSessionIfNeeded() {
         sessionQueue.async { [self] in
-            guard videoDeviceInput != nil, !session.isRunning else { return }
-            session.startRunning()
+            guard videoDeviceInput != nil else { return }
+            if !session.isRunning {
+                session.startRunning()
+            }
             let running = session.isRunning
             Task { @MainActor in
-                if running { self.status = .running }
+                guard running else { return }
+                if self.status != .recording {
+                    self.status = .running
+                }
             }
         }
     }
