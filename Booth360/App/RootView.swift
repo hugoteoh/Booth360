@@ -108,6 +108,7 @@ struct RootView: View {
             },
             renders: {
                 var descriptor = FetchDescriptor<RenderedVideo>(
+                    predicate: #Predicate { $0.hiddenFromWall == false },
                     sortBy: [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)])
                 descriptor.fetchLimit = 30
                 let items = (try? modelContext.fetch(descriptor)) ?? []

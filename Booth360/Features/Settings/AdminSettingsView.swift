@@ -65,6 +65,10 @@ struct AdminSettingsView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                     SecureField("SecretKey（存入 Keychain）", text: $cosConfig.secretKey)
+                    TextField("自定义域名（如 booth360.yanyanle.com）", text: $cosConfig.customDomain)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
                     Button("保存 COS 配置") {
                         cosConfig.save()
                         if cosConfig.isComplete {

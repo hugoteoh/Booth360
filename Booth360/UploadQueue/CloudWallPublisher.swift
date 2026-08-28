@@ -22,7 +22,7 @@ enum CloudWallPublisher {
     static var pageURLString: String? {
         let config = COSConfig.load()
         guard config.isComplete else { return nil }
-        return "https://\(config.host)/booth360/wall/index.html"
+        return "https://\(config.publicHost)/booth360/wall/index.html"
     }
 
     /// 发布/刷新云端大屏。items 传最近的已上传成品（新→旧）。
@@ -38,13 +38,16 @@ enum CloudWallPublisher {
             var jsonItems: [[String: Any]] = []
             for item in items {
                 let baseKey = "booth360/\(item.id.uuidString.lowercased())"
-                // 落地页与二维码用永久公开地址；页内视频链接每次发布续期 7 天
-                let pageURL = "https://\(config.host)/\(baseKey)/index.html"
-                let qrURL = "https://\(config.host)/\(baseKey)/qr.png"
+                // 落地页与二维码用永久公开地址（自定义域名）；页内视频链接每次发布续期 7 天。
+                // 未配置自定义域名时二维码退回视频直链（默认域名 HTML 会被微信当附件下载）。
+                let pageURL = "https://\(config.publicHost)/\(baseKey)/index.html"
+                let qrURL = "https://\(config.publicHost)/\(baseKey)/qr.png"
                 guard let videoURL = COSSigner.signedURL(
                         config: config, objectKey: "\(baseKey)/\(item.fileName)",
                         method: "get", expiresSeconds: TencentCOSBackend.downloadExpirySeconds),
-                      let qrImage = QRCodeGenerator.image(for: pageURL, sidePixels: 480),
+                      let qrImage = QRCodeGenerator.image(
+                        for: config.hasCustomDomain ? pageURL : videoURL.absoluteString,
+                        sidePixels: 480),
                       let qrPNG = qrImage.pngData() else { continue }
                 try await putPublicObject(
                     data: qrPNG,

@@ -54,19 +54,6 @@ enum WallPageTemplate {
           @keyframes wallIn{from{opacity:0;transform:translateY(26px) scale(.96)}
                             to{opacity:1;transform:none}}
           @keyframes wallGlow{0%,100%{filter:brightness(.95)}50%{filter:brightness(1.06)}}
-          /* spotlight（照抄 #spot：最新一条弹中央，再缩小飞回墙里） */
-          #spot{position:fixed;inset:0;z-index:50;display:flex;align-items:center;
-                justify-content:center;opacity:0;transition:opacity .8s ease;
-                pointer-events:none;background:rgba(0,0,0,0)}
-          #spot.on{opacity:1;background:rgba(0,0,0,.42)}
-          #spot .srow{display:flex;gap:2vw;align-items:flex-end;justify-content:center;
-                      transition:transform .85s cubic-bezier(.6,0,.85,.35),opacity .85s ease}
-          #spot .spic video{display:block;max-height:78vh;aspect-ratio:9/16;object-fit:cover;
-                            border-radius:6px;box-shadow:0 36px 110px rgba(0,0,0,.75)}
-          #spot .sqr{width:clamp(120px,12vw,180px);aspect-ratio:1;background:#fff;
-                     border-radius:10px;padding:8px;margin-bottom:8px}
-          #spot .sqr img{width:100%;height:100%;image-rendering:pixelated;display:block}
-          #spot.merge .srow{transform:scale(.08) translateY(-44vh);opacity:0}
         </style>
         </head>
         <body>
@@ -75,7 +62,6 @@ enum WallPageTemplate {
           <div class="en">Waiting for the first video…</div></div>
         <div id="grid"></div>
         <div class="vign"></div>
-        <div id="spot"></div>
 
         <script>
         \(variantJS)
@@ -83,11 +69,8 @@ enum WallPageTemplate {
         <script>
         const MAX_CARDS = 8;
         const grid = document.getElementById("grid");
-        const spot = document.getElementById("spot");
         const known = new Map(); // id -> { el, hasQR }
         let cellSeq = 0;
-        let firstLoad = true;
-        let spotBusy = false;
 
         const gearEl = document.getElementById("gear");
         if (typeof GEAR_HREF === "string" && GEAR_HREF) {
@@ -118,24 +101,6 @@ enum WallPageTemplate {
           return el;
         }
 
-        // spotlight：新视频先弹中央大图 5 秒，再缩小“飞回”墙里
-        function spotlight(item) {
-          if (spotBusy) return;
-          spotBusy = true;
-          spot.innerHTML = `<div class="srow">
-            <div class="spic"><video src="${item.videoURL}" autoplay muted loop playsinline></video></div>
-            <div class="sqr">${item.qrURL ? `<img src="${item.qrURL}">` : ""}</div></div>`;
-          spot.classList.add("on");
-          setTimeout(() => {
-            spot.classList.add("merge");
-            setTimeout(() => {
-              spot.classList.remove("on", "merge");
-              spot.innerHTML = "";
-              spotBusy = false;
-            }, 900);
-          }, 5000);
-        }
-
         async function refresh() {
           try {
             const items = (await fetchItems()).slice(0, MAX_CARDS);
@@ -149,7 +114,6 @@ enum WallPageTemplate {
               const el = cardEl(item);
               grid.prepend(el);
               known.set(item.id, { el, hasQR: !!item.qrURL });
-              if (!firstLoad) spotlight(item);
             }
             while (grid.children.length > MAX_CARDS) {
               const last = grid.lastElementChild;
@@ -165,7 +129,6 @@ enum WallPageTemplate {
               }
             }
             applyCols(grid.children.length);
-            firstLoad = false;
           } catch (e) { /* 网络抖动，下轮再试 */ }
         }
         refresh();

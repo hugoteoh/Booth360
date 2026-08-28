@@ -7,8 +7,16 @@ struct COSConfig {
     var bucket: String
     var secretId: String
     var secretKey: String
+    /// 自定义域名（如 booth360.yanyanle.com，反代到 COS 桶）。
+    /// 落地页/大屏/二维码等公开链接用它——COS 默认域名访问 HTML 会被强制下载，微信里打不开。
+    var customDomain: String = ""
 
+    /// 签名与上传用的桶默认域名（反代会带这个 Host 回源，签名保持有效）。
     var host: String { "\(bucket).cos.\(region).myqcloud.com" }
+
+    /// 公开页面链接用的域名。
+    var publicHost: String { customDomain.isEmpty ? host : customDomain }
+    var hasCustomDomain: Bool { !customDomain.isEmpty }
 
     var isComplete: Bool {
         !region.isEmpty && !bucket.isEmpty && !secretId.isEmpty && !secretKey.isEmpty
@@ -19,6 +27,7 @@ struct COSConfig {
         static let bucket = "booth360.cos.bucket"
         static let secretId = "booth360.cos.secretId"
         static let secretKey = "booth360.cos.secretKey"
+        static let customDomain = "booth360.cos.customDomain"
     }
 
     static func load() -> COSConfig {
@@ -27,7 +36,8 @@ struct COSConfig {
             region: defaults.string(forKey: Key.region) ?? "ap-shanghai",
             bucket: defaults.string(forKey: Key.bucket) ?? "",
             secretId: defaults.string(forKey: Key.secretId) ?? "",
-            secretKey: KeychainStore.get(Key.secretKey) ?? ""
+            secretKey: KeychainStore.get(Key.secretKey) ?? "",
+            customDomain: defaults.string(forKey: Key.customDomain) ?? ""
         )
     }
 
@@ -36,6 +46,7 @@ struct COSConfig {
         defaults.set(region, forKey: Key.region)
         defaults.set(bucket, forKey: Key.bucket)
         defaults.set(secretId, forKey: Key.secretId)
+        defaults.set(customDomain, forKey: Key.customDomain)
         KeychainStore.set(secretKey, forKey: Key.secretKey)
     }
 }
@@ -167,7 +178,8 @@ struct TencentCOSBackend: UploadBackend {
         }
 
         // 生成扫码落地页（公开可读、地址永久）：二维码指向落地页而非裸视频文件。
-        // 页内视频链接 7 天有效；云端大屏每次发布会自动续期刷新该页。
+        // 注意：COS 默认域名访问 HTML 会被强制当附件下载（微信打不开），
+        // 所以只有配置了自定义域名时二维码才指向落地页；否则回退视频直链（微信可直接播放）。
         let baseKey = objectKey.split(separator: "/").dropLast().joined(separator: "/")
         let landingHTML = DownloadPageHTML.html(
             videoURL: videoGET.absoluteString,
@@ -181,7 +193,8 @@ struct TencentCOSBackend: UploadBackend {
                 contentType: "text/html; charset=utf-8",
                 config: config
             )
-            if let pageURL = URL(string: "https://\(config.host)/\(baseKey)/index.html") {
+            if config.hasCustomDomain,
+               let pageURL = URL(string: "https://\(config.publicHost)/\(baseKey)/index.html") {
                 return pageURL
             }
         } catch {

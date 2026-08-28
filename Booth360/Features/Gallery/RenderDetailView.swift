@@ -31,10 +31,11 @@ struct RenderDetailView: View {
     var body: some View {
         List {
             Section {
+                // 固定容器 + 播放器自居中：避免 List 内 aspectRatio 首次布局把视频锚到左侧的系统 bug
                 VideoPlayer(player: player)
-                    .aspectRatio(CGFloat(max(render.width, 1)) / CGFloat(max(render.height, 1)),
-                                 contentMode: .fit)
-                    .frame(maxHeight: 420)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 430)
+                    .background(Color.black)
                     .listRowInsets(EdgeInsets())
                     .onAppear {
                         guard fileExists else { return }
@@ -65,6 +66,15 @@ struct RenderDetailView: View {
                     Label("收藏", systemImage: "star")
                 }
                 .onChange(of: render.isFavorite) { _, _ in try? modelContext.save() }
+
+                Toggle(isOn: $render.hiddenFromWall) {
+                    Label("隐藏，不上大屏", systemImage: "eye.slash")
+                }
+                .onChange(of: render.hiddenFromWall) { _, _ in
+                    try? modelContext.save()
+                    // 云端大屏立即刷新（本地大屏下一次轮询自动生效）
+                    uploadQueue.republishWall()
+                }
 
                 ShareLink(item: fileURL) {
                     Label("分享", systemImage: "square.and.arrow.up")

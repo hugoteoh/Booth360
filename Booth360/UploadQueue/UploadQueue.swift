@@ -214,11 +214,16 @@ final class UploadQueue {
         set { UserDefaults.standard.set(newValue, forKey: "booth360.cloudWallEnabled") }
     }
 
-    /// COS 模式且开关打开时，把最近 30 条已上传成品发布/刷新到云端大屏。
+    /// 手动触发云端大屏刷新（隐藏/取消隐藏某条后调用）。
+    func republishWall() {
+        publishCloudWallIfNeeded()
+    }
+
+    /// COS 模式且开关打开时，把最近 30 条已上传成品（未隐藏的）发布/刷新到云端大屏。
     private func publishCloudWallIfNeeded() {
         guard UploadMode.current == .cos, Self.cloudWallEnabled else { return }
         var descriptor = FetchDescriptor<RenderedVideo>(
-            predicate: #Predicate { $0.uploadStateRawValue == "done" },
+            predicate: #Predicate { $0.uploadStateRawValue == "done" && $0.hiddenFromWall == false },
             sortBy: [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)]
         )
         descriptor.fetchLimit = 30
