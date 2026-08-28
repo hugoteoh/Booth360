@@ -11,6 +11,9 @@ struct EventListView: View {
     @Query(sort: \EventTemplate.updatedAt, order: .reverse) private var events: [EventTemplate]
     @Environment(\.modelContext) private var modelContext
     @State private var activeEventID: UUID? = EventManager.activeEventID
+    /// 编辑页改为程序化跳转，避免 NavigationLink 内嵌 ▶ 按钮导致
+    /// push 与 fullScreenCover 同时触发把界面卡死（黑屏）。
+    @State private var editingEvent: EventTemplate?
 
     private var manager: EventManager { EventManager(storage: storage) }
 
@@ -43,13 +46,17 @@ struct EventListView: View {
                 }
             }
         }
+        .navigationDestination(item: $editingEvent) { event in
+            EventEditView(event: event, storage: storage)
+        }
     }
 
     private func eventRow(_ event: EventTemplate) -> some View {
-        NavigationLink {
-            EventEditView(event: event, storage: storage)
-        } label: {
-            HStack(spacing: 12) {
+        HStack(spacing: 12) {
+            // 左侧：点文字区进编辑
+            Button {
+                editingEvent = event
+            } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(event.name)
@@ -68,18 +75,28 @@ struct EventListView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Spacer()
-                Button {
-                    EventManager.activeEventID = event.id
-                    activeEventID = event.id
-                    onLaunchGuestMode(event)
-                } label: {
-                    Image(systemName: "play.rectangle.on.rectangle.fill")
-                        .font(.title3)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("启动嘉宾模式")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+
+            // 右侧：独立的 ▶ 启动嘉宾模式（与编辑跳转完全分离）
+            Button {
+                EventManager.activeEventID = event.id
+                activeEventID = event.id
+                onLaunchGuestMode(event)
+            } label: {
+                Image(systemName: "play.rectangle.on.rectangle.fill")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("启动嘉宾模式")
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {

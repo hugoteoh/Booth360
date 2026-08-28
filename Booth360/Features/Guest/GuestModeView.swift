@@ -23,7 +23,8 @@ struct GuestModeView: View {
                 content(viewModel)
             } else {
                 Color.black.ignoresSafeArea()
-                    .task {
+                    .onAppear {
+                        guard viewModel == nil else { return }
                         viewModel = GuestFlowViewModel(
                             event: event,
                             cameraEngine: cameraEngine,
