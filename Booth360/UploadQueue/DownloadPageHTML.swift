@@ -22,9 +22,10 @@ enum DownloadPageHTML {
                  font-family:-apple-system,"Microsoft YaHei",sans-serif;
                  display:flex; flex-direction:column; align-items:center; justify-content:center;
                  padding:14px 16px calc(16px + env(safe-area-inset-bottom)); }
-          .vwrap { width:100%; max-width:560px; display:flex; justify-content:center; }
+          /* 卡片收缩到视频实际宽度，按钮因此永远与视频等宽（宽屏也不会拉开） */
+          .card { display:flex; flex-direction:column; width:fit-content; max-width:min(560px,100%); }
           video { display:block; max-width:100%; max-height:66vh; background:#000; }
-          .btns { width:100%; max-width:560px; margin-top:14px; }
+          .btns { margin-top:14px; }
           .btns a { display:flex; align-items:center; justify-content:center; height:50px;
                     background:#fff; color:#000; border-radius:14px;
                     font-weight:600; font-size:16px; letter-spacing:.05em; text-decoration:none;
@@ -35,11 +36,11 @@ enum DownloadPageHTML {
         </style>
         </head>
         <body>
-        <div class="vwrap" id="vwrap">
+        <div class="card">
           <video id="video" src="\(videoURL)" controls autoplay muted loop playsinline preload="metadata"></video>
+          <div class="btns"><a href="\(videoURL)" download>下载视频</a></div>
         </div>
         <p id="videoError">视频链接可能已过期或网络暂时不可用。请稍后重试，或联系现场工作人员重新生成下载链接。</p>
-        <div class="btns"><a href="\(videoURL)" download>下载视频</a></div>
 
         <script>
         (function () {
