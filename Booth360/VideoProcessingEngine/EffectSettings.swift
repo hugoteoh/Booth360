@@ -137,6 +137,13 @@ struct EffectSettings: Equatable, Codable {
     var resolution: OutputResolution = .r1080
     var codec: OutputCodec = .hevc
 
+    /// 拍摄模式曲线（非空时优先于 speed/style 生效）。
+    var shotKindRaw: String?
+
+    var shotKind: ShotModeKind? {
+        shotKindRaw.flatMap { ShotModeKind(rawValue: $0) }
+    }
+
     init() {}
 
     /// 自定义解码：全部 decodeIfPresent + 默认值。
@@ -159,13 +166,17 @@ struct EffectSettings: Equatable, Codable {
         aspect = try container.decodeIfPresent(OutputAspect.self, forKey: .aspect) ?? .portrait916
         resolution = try container.decodeIfPresent(OutputResolution.self, forKey: .resolution) ?? .r1080
         codec = try container.decodeIfPresent(OutputCodec.self, forKey: .codec) ?? .hevc
+        shotKindRaw = try container.decodeIfPresent(String.self, forKey: .shotKindRaw)
     }
 
     /// 原声只在“原速 + 正放”时可用（变速/倒放会导致声音变调或倒转，一律丢弃）。
     var canUseOriginalAudio: Bool { speed == .normal && style == .forward }
 
-    /// 倒放和 Boomerang 需要先生成倒序中间文件。
-    var needsReversedAsset: Bool { style != .forward }
+    /// 倒放和 Boomerang（或含倒放段的拍摄模式曲线）需要先生成倒序中间文件。
+    var needsReversedAsset: Bool {
+        if let shotKind { return shotKind.usesReverse }
+        return style != .forward
+    }
 
     /// 输出渲染尺寸（宽高都取偶数，编码器要求）。
     static func renderSize(aspect: OutputAspect, resolution: OutputResolution) -> CGSize {
@@ -192,7 +203,12 @@ struct EffectSettings: Equatable, Codable {
 
     /// 存入 RenderedVideo 的可读描述，如 "慢-快-慢 · Boomerang · ×2 · 美颜 · 9:16 1080p HEVC"。
     var summaryText: String {
-        var parts = [speed.displayName, style.displayName]
+        var parts: [String]
+        if let shotKind {
+            parts = [shotKind.displayName]
+        } else {
+            parts = [speed.displayName, style.displayName]
+        }
         if loopCount > 1 { parts.append("×\(loopCount)") }
         if beautyEnabled { parts.append("美颜") }
         if filterPreset != .none { parts.append(filterPreset.displayName) }

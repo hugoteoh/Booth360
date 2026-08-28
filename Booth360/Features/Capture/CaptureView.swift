@@ -274,6 +274,9 @@ struct CaptureView: View {
             }
 
             if viewModel.phase == .idle {
+                if !viewModel.shotModes.isEmpty {
+                    shotModeRow
+                }
                 settingsRow
             }
 
@@ -281,6 +284,42 @@ struct CaptureView: View {
         }
         .padding(.bottom, 28)
         .animation(.easeInOut(duration: 0.25), value: viewModel.lastSavedClip != nil)
+    }
+
+    /// 拍摄模式按钮排（当前活动启用的模式，选中后按该曲线拍摄）。
+    private var shotModeRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(viewModel.shotModes) { mode in
+                    let selected = viewModel.selectedShotMode?.id == mode.id
+                    Button {
+                        viewModel.selectedShotModeID = mode.id
+                    } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: mode.kind.sfSymbol)
+                                .font(.title3)
+                            Text(mode.kind.displayName)
+                                .font(.caption2.weight(.semibold))
+                            Text("\(mode.recordingSeconds)s")
+                                .font(.system(size: 9))
+                                .opacity(0.7)
+                        }
+                        .foregroundStyle(.white)
+                        .frame(width: 76, height: 64)
+                        .background(
+                            selected ? AnyShapeStyle(Color.accentColor.opacity(0.85))
+                                     : AnyShapeStyle(.black.opacity(0.45)),
+                            in: RoundedRectangle(cornerRadius: 14)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(selected ? .white : .clear, lineWidth: 1.5)
+                        )
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
     }
 
     private var settingsRow: some View {
@@ -299,14 +338,17 @@ struct CaptureView: View {
                 )
             }
 
-            Menu {
-                ForEach(RecordingSettings.durationChoices, id: \.self) { seconds in
-                    Button("\(seconds) 秒") {
-                        viewModel.settings.recordingSeconds = seconds
+            // 有模式排时长跟模式走，无模式时才显示「录 Ns」
+            if viewModel.shotModes.isEmpty {
+                Menu {
+                    ForEach(RecordingSettings.durationChoices, id: \.self) { seconds in
+                        Button("\(seconds) 秒") {
+                            viewModel.settings.recordingSeconds = seconds
+                        }
                     }
+                } label: {
+                    pillLabel(icon: "video.badge.checkmark", text: "录 \(viewModel.settings.recordingSeconds)s")
                 }
-            } label: {
-                pillLabel(icon: "video.badge.checkmark", text: "录 \(viewModel.settings.recordingSeconds)s")
             }
 
             Button {
@@ -343,7 +385,7 @@ struct CaptureView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(.red)
                         .frame(width: 38, height: 38)
-                    Text("\(viewModel.recordingElapsedSeconds)s / \(viewModel.settings.recordingSeconds)s")
+                    Text("\(viewModel.recordingElapsedSeconds)s / \(viewModel.effectiveRecordingSeconds)s")
                         .font(.caption.weight(.bold).monospacedDigit())
                         .foregroundStyle(.white)
                         .offset(y: 64)

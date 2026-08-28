@@ -40,6 +40,8 @@ final class EventTemplate {
 
     /// EffectSettings 的 JSON（结构见 VideoProcessingEngine/EffectSettings.swift）。
     var effectSettingsData: Data
+    /// 拍摄模式列表 [ShotMode] 的 JSON（空 = 用默认库）。
+    var shotModesData: Data = Data()
 
     init(
         id: UUID = UUID(),
@@ -90,5 +92,25 @@ extension EventTemplate {
 
     var recordingSettings: RecordingSettings {
         RecordingSettings(countdownSeconds: countdownSeconds, recordingSeconds: recordingSeconds)
+    }
+
+    /// 拍摄模式列表（解码失败/未配置回落默认库）。
+    var shotModes: [ShotMode] {
+        get {
+            guard !shotModesData.isEmpty,
+                  let modes = try? JSONDecoder().decode([ShotMode].self, from: shotModesData),
+                  !modes.isEmpty else {
+                return ShotMode.defaultLibrary
+            }
+            return modes
+        }
+        set {
+            shotModesData = (try? JSONEncoder().encode(newValue)) ?? shotModesData
+            updatedAt = Date()
+        }
+    }
+
+    var enabledShotModes: [ShotMode] {
+        shotModes.filter(\.enabled)
     }
 }

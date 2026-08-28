@@ -209,12 +209,21 @@ final class VideoProcessingEngine {
         }
         if flag.isCancelled { throw ProcessingError.cancelled }
 
-        let segments = TimelineBuilder.build(
-            clipDurationSeconds: clipDuration,
-            effect: settings.speed,
-            style: settings.style,
-            loopCount: settings.loopCount
-        )
+        let segments: [TimelineSegment]
+        if let kind = settings.shotKind {
+            segments = TimelineBuilder.build(
+                kind: kind,
+                clipDurationSeconds: clipDuration,
+                loopCount: settings.loopCount
+            )
+        } else {
+            segments = TimelineBuilder.build(
+                clipDurationSeconds: clipDuration,
+                effect: settings.speed,
+                style: settings.style,
+                loopCount: settings.loopCount
+            )
+        }
 
         func assetIfUsable(_ url: URL?, enabled: Bool) -> AVAsset? {
             guard enabled, let url, FileManager.default.fileExists(atPath: url.path) else { return nil }

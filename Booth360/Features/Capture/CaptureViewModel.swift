@@ -44,6 +44,18 @@ final class CaptureViewModel {
 
     var settings = RecordingSettings()
     var manualControls = ManualControlState()
+    /// 当前活动启用的拍摄模式（拍摄页底部按钮排）。
+    private(set) var shotModes: [ShotMode] = []
+    var selectedShotModeID: UUID?
+
+    var selectedShotMode: ShotMode? {
+        shotModes.first { $0.id == selectedShotModeID } ?? shotModes.first
+    }
+
+    /// 本次录制实际时长：选中模式的时长优先，否则用页面上的「录 Ns」。
+    var effectiveRecordingSeconds: Int {
+        selectedShotMode?.recordingSeconds ?? settings.recordingSeconds
+    }
 
     let engine: CameraEngine
     let storage: FileStorageService
@@ -78,9 +90,17 @@ final class CaptureViewModel {
         updateAutomation()
     }
 
-    /// 按「当前活动」的开关同步自动化：Motion Trigger 待机监听、转台预连、远程状态回写。
+    /// 按「当前活动」的开关同步自动化：拍摄模式列表、Motion Trigger、转台预连、远程状态。
     private func updateAutomation() {
         let event = modelContext.flatMap { EventManager.activeEvent(in: $0) }
+
+        let modes = event?.enabledShotModes ?? []
+        if modes != shotModes {
+            shotModes = modes
+        }
+        if selectedShotModeID == nil || !modes.contains(where: { $0.id == selectedShotModeID }) {
+            selectedShotModeID = modes.first?.id
+        }
 
         if phase == .idle, review == nil, !processingEngine.isBusy,
            event?.motionTriggerEnabled == true, engine.status == .running {
@@ -183,7 +203,7 @@ final class CaptureViewModel {
         AppLogger.storage.info("录制前可用空间 \(String(format: "%.1f", freeGB), privacy: .public) GB")
 
         do {
-            let info = try await engine.startRecording(to: url, maxSeconds: settings.recordingSeconds)
+            let info = try await engine.startRecording(to: url, maxSeconds: effectiveRecordingSeconds)
             if spinEnabled { turntable?.sendStop() }
             elapsedTask?.cancel()
             phase = .saving
@@ -253,6 +273,8 @@ final class CaptureViewModel {
         var effect = event.effectSettings
         effect.overlayEnabled = effect.overlayEnabled && overlayImage != nil
         effect.musicEnabled = effect.musicEnabled && musicURL != nil
+        // 选中的拍摄模式曲线优先于活动里的 speed/style
+        effect.shotKindRaw = selectedShotMode?.kind.rawValue
 
         let outputURL = storage.newRenderURL()
         do {

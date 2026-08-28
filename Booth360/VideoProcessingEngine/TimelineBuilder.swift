@@ -24,6 +24,38 @@ enum TimelineBuilder {
     /// 慢-快-慢的分段比例：前 25% 慢、中间 50% 快、后 25% 慢。
     static let slowFastSlowSplit = (slow: 0.25, fast: 0.5)
 
+    // MARK: - 入口（拍摄模式曲线）
+
+    /// 按 ShotModeKind 的多段曲线展开时间轴（支持中段插倒放），再按 loopCount 重复。
+    static func build(
+        kind: ShotModeKind,
+        clipDurationSeconds duration: Double,
+        loopCount: Int
+    ) -> [TimelineSegment] {
+        guard duration > 0 else { return [] }
+        let single: [TimelineSegment] = kind.ops.map { op in
+            let start = op.fromFraction * duration
+            let length = (op.toFraction - op.fromFraction) * duration
+            if op.reversed {
+                // 倒放素材坐标：start' = 总长 - 区间末端
+                return TimelineSegment(
+                    source: .reversed,
+                    sourceStartSeconds: max(0, duration - op.toFraction * duration),
+                    sourceDurationSeconds: length,
+                    targetDurationSeconds: length / op.rate
+                )
+            }
+            return TimelineSegment(
+                source: .original,
+                sourceStartSeconds: start,
+                sourceDurationSeconds: length,
+                targetDurationSeconds: length / op.rate
+            )
+        }
+        let loops = max(1, loopCount)
+        return Array(repeating: single, count: loops).flatMap { $0 }
+    }
+
     // MARK: - 入口
 
     static func build(

@@ -87,6 +87,7 @@ struct EventManager {
         copy.outroFileName = event.outroFileName
         copy.motionTriggerEnabled = event.motionTriggerEnabled
         copy.turntableSpinEnabled = event.turntableSpinEnabled
+        copy.shotModesData = event.shotModesData
         context.insert(copy)
 
         let sourceFolder = folderURL(for: event)

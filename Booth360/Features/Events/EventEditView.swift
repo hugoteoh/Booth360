@@ -18,6 +18,8 @@ struct EventEditView: View {
     @State private var errorMessage: String?
     /// 效果参数以值类型草稿绑定，onChange 回写 Data。
     @State private var effectDraft = EffectSettings()
+    /// 拍摄模式草稿（勾选启用 + 每模式时长）。
+    @State private var shotModesDraft: [ShotMode] = []
 
     private var manager: EventManager { EventManager(storage: storage) }
 
@@ -65,6 +67,36 @@ struct EventEditView: View {
                 }
                 Toggle("转台起转自动开拍", isOn: $event.motionTriggerEnabled)
                 Toggle("拍摄时蓝牙控制转台旋转", isOn: $event.turntableSpinEnabled)
+            }
+
+            Section {
+                ForEach($shotModesDraft) { $mode in
+                    HStack(spacing: 12) {
+                        Toggle(isOn: $mode.enabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label(mode.kind.displayName, systemImage: mode.kind.sfSymbol)
+                                Text(mode.kind.curveDescription)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Menu {
+                            ForEach([5, 10, 15, 20, 30], id: \.self) { seconds in
+                                Button("\(seconds) 秒") { mode.recordingSeconds = seconds }
+                            }
+                        } label: {
+                            Text("\(mode.recordingSeconds)s")
+                                .font(.footnote.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Color(.systemGray5), in: Capsule())
+                        }
+                    }
+                }
+            } header: {
+                Text("拍摄模式（勾选的会出现在拍摄页底部）")
+            } footer: {
+                Text("每个模式可设独立录制时长；含「回旋」的模式处理时间稍长（需生成倒放素材，二次起走缓存）。")
             }
 
             Section("效果参数") {
@@ -119,9 +151,16 @@ struct EventEditView: View {
         }
         .navigationTitle(event.name)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { effectDraft = event.effectSettings }
+        .onAppear {
+            effectDraft = event.effectSettings
+            shotModesDraft = event.shotModes
+        }
         .onChange(of: effectDraft) { _, newValue in
             event.effectSettings = newValue
+            try? modelContext.save()
+        }
+        .onChange(of: shotModesDraft) { _, newValue in
+            event.shotModes = newValue
             try? modelContext.save()
         }
         .onChange(of: logoPickerItem) { _, item in importImage(item, kind: .logo) }
