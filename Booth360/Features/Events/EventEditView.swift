@@ -14,7 +14,10 @@ struct EventEditView: View {
     @State private var backgroundPickerItem: PhotosPickerItem?
     @State private var overlayPickerItem: PhotosPickerItem?
     /// 当前正在通过文件选择器导入的素材类型（音乐/片头/片尾/动态 Overlay）。
-    @State private var importKind: EventManager.AssetKind?
+    /// 注意：类型与“选择器是否打开”必须是两个状态——fileImporter 会先关闭再回调，
+    /// 若用同一个 Optional 承担两职，回调时类型已被清空，导入会静默失败。
+    @State private var importTarget: EventManager.AssetKind = .music
+    @State private var importerPresented = false
     @State private var errorMessage: String?
     /// 效果参数以值类型草稿绑定，onChange 回写 Data。
     @State private var effectDraft = EffectSettings()
@@ -155,13 +158,10 @@ struct EventEditView: View {
         .onChange(of: backgroundPickerItem) { _, item in importImage(item, kind: .background) }
         .onChange(of: overlayPickerItem) { _, item in importImage(item, kind: .overlay) }
         .fileImporter(
-            isPresented: Binding(
-                get: { importKind != nil },
-                set: { if !$0 { importKind = nil } }
-            ),
-            allowedContentTypes: importKind == .music ? [.audio] : [.movie, .video, .mpeg4Movie, .quickTimeMovie]
+            isPresented: $importerPresented,
+            allowedContentTypes: importTarget == .music ? [.audio] : [.movie, .video, .mpeg4Movie, .quickTimeMovie]
         ) { result in
-            importFile(result)
+            importFile(result, kind: importTarget)
         }
         .alert("出错了", isPresented: Binding(
             get: { errorMessage != nil },
@@ -220,7 +220,8 @@ struct EventEditView: View {
     /// 音乐/片头/片尾/动态 Overlay 的文件导入行。
     private func fileAssetRow(title: String, value: String?, kind: EventManager.AssetKind) -> some View {
         Button {
-            importKind = kind
+            importTarget = kind
+            importerPresented = true
         } label: {
             HStack {
                 Text(title)
@@ -234,9 +235,7 @@ struct EventEditView: View {
         .foregroundStyle(.primary)
     }
 
-    private func importFile(_ result: Result<URL, Error>) {
-        guard let kind = importKind else { return }
-        importKind = nil
+    private func importFile(_ result: Result<URL, Error>, kind: EventManager.AssetKind) {
         switch result {
         case .success(let url):
             let didAccess = url.startAccessingSecurityScopedResource()
