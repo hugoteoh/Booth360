@@ -45,6 +45,8 @@ struct RootView: View {
             systemMonitor.start()
             uploadQueue.resumePendingOnLaunch()
             wireLANServer()
+            // 拍摄亭现场：屏幕常亮，防止自动锁屏挂起 App（顺带断掉局域网服务器）
+            UIApplication.shared.isIdleTimerDisabled = true
             // 局域网控制默认常开：启动即拉起，无需每次手动打开
             if LANControlServer.autoStartEnabled { lanServer.start() }
             // 兜底：为“文件在、记录丢”的孤儿视频补建数据库记录
