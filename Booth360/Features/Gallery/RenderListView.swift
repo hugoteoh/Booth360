@@ -29,6 +29,11 @@ struct RenderListView: View {
         }
         .navigationTitle("成品（\(renders.count)）")
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            if !renders.isEmpty {
+                uploadStatsBar
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -97,6 +102,34 @@ struct RenderListView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// 底部上传统计条：已上传 / 上传中 / 失败（/ 未上传）。
+    private var uploadStatsBar: some View {
+        let done = renders.filter { $0.uploadState == .done }.count
+        let uploading = renders.filter { $0.uploadState == .uploading || $0.uploadState == .queued }.count
+        let failed = renders.filter { $0.uploadState == .failed }.count
+        let pending = renders.filter { $0.uploadState == .none }.count
+
+        return HStack(spacing: 16) {
+            statDot(color: .green, label: "已上传", count: done)
+            statDot(color: .gray, label: "上传中", count: uploading)
+            statDot(color: .red, label: "失败", count: failed)
+            if pending > 0 {
+                statDot(color: .yellow, label: "未上传", count: pending)
+            }
+        }
+        .font(.footnote.weight(.medium))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private func statDot(color: Color, label: String, count: Int) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text("\(label)：\(count)")
         }
     }
 
