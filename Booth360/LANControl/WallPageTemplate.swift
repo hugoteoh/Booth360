@@ -150,8 +150,10 @@ enum WallPageTemplate {
             <div class="psec">背景</div>
             <div class="bgrow" id="bgrow"></div>
             <div class="bgimg">
-              <input id="bgurl" type="text" placeholder="背景图片 URL（留空 = 不用图片）">
+              <button id="bgupload">上传图片</button>
+              <input id="bgurl" type="text" placeholder="或粘贴图片 URL（留空 = 不用图片）">
               <button id="bgapply">应用</button>
+              <input id="bgfile" type="file" accept="image/*" style="display:none">
             </div>
             <div class="pfoot">
               <a id="consoleLink" href="#" style="display:none">打开控制台 →</a>
@@ -231,11 +233,44 @@ enum WallPageTemplate {
           c.title = "自定义颜色";
           c.oninput = () => setBG({ type: "color", value: c.value });
           row.appendChild(c);
-          document.getElementById("bgurl").value = bg.type === "image" ? (bg.url || "") : "";
+          // 上传的图片是超长 data: 串，不回填输入框，占位提示即可
+          const urlInput = document.getElementById("bgurl");
+          if (bg.type === "image" && bg.url && !bg.url.startsWith("data:")) {
+            urlInput.value = bg.url;
+            urlInput.placeholder = "或粘贴图片 URL（留空 = 不用图片）";
+          } else {
+            urlInput.value = "";
+            urlInput.placeholder = bg.type === "image"
+              ? "当前使用上传的图片（留空应用 = 恢复默认）"
+              : "或粘贴图片 URL（留空 = 不用图片）";
+          }
         }
         document.getElementById("bgapply").onclick = () => {
           const url = document.getElementById("bgurl").value.trim();
           setBG(url ? { type: "image", url } : { type: "preset", key: "obsidian" });
+        };
+        // 本地上传：读文件 → 压到 1920 宽 JPEG → data URL 存 localStorage（不经过服务器）
+        document.getElementById("bgupload").onclick = () => {
+          document.getElementById("bgfile").click();
+        };
+        document.getElementById("bgfile").onchange = (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          const fr = new FileReader();
+          fr.onload = () => {
+            const img = new Image();
+            img.onload = () => {
+              const scale = Math.min(1, 1920 / img.width);
+              const c = document.createElement("canvas");
+              c.width = Math.round(img.width * scale);
+              c.height = Math.round(img.height * scale);
+              c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+              setBG({ type: "image", url: c.toDataURL("image/jpeg", 0.82) });
+            };
+            img.src = fr.result;
+          };
+          fr.readAsDataURL(file);
+          e.target.value = "";
         };
         applyBG();
 
