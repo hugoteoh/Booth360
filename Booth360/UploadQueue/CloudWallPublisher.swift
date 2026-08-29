@@ -25,9 +25,10 @@ enum CloudWallPublisher {
         return "https://\(config.publicHost)/booth360/wall/index.html"
     }
 
-    /// 发布/刷新云端大屏。items 传最近的已上传成品（新→旧）；
+    /// 发布/刷新云端大屏。items 传最近的已上传成品（新→旧），galleryItems 传当前活动全部成品
+    /// （视频总览页用，签名是本地计算，条数多也不增加网络开销——只多一个 gallery.json 上传）。
     /// 空列表也照常发布（大屏显示等待画面），用于切换活动后清空上一场的节目单。
-    static func publish(items: [WallItem]) async {
+    static func publish(items: [WallItem], galleryItems: [WallItem] = []) async {
         let config = COSConfig.load()
         guard config.isComplete else { return }
 
@@ -92,7 +93,38 @@ enum CloudWallPublisher {
                 contentType: "text/html; charset=utf-8",
                 config: config
             )
-            AppLogger.storage.info("云端大屏已发布 \(jsonItems.count) 条")
+
+            // 4. 视频总览：gallery.json（当前活动全部成品，链接 7 天签名本地生成）+ 页面
+            let galleryFormatter = DateFormatter()
+            galleryFormatter.dateFormat = "MM-dd HH:mm"
+            let galleryJSON: [[String: Any]] = galleryItems.compactMap { item in
+                let key = "booth360/\(item.id.uuidString.lowercased())/\(item.fileName)"
+                guard let url = COSSigner.signedURL(
+                    config: config, objectKey: key, method: "get",
+                    expiresSeconds: TencentCOSBackend.downloadExpirySeconds) else { return nil }
+                return [
+                    "id": item.id.uuidString,
+                    "time": galleryFormatter.string(from: item.createdAt),
+                    "url": url.absoluteString,
+                ]
+            }
+            let galleryManifest: [String: Any] = [
+                "updatedAt": Int(Date().timeIntervalSince1970),
+                "items": galleryJSON,
+            ]
+            try await putPublicObject(
+                data: try JSONSerialization.data(withJSONObject: galleryManifest),
+                objectKey: "booth360/wall/gallery.json",
+                contentType: "application/json",
+                config: config
+            )
+            try await putPublicObject(
+                data: Data(CloudGalleryPageHTML.html.utf8),
+                objectKey: "booth360/wall/gallery.html",
+                contentType: "text/html; charset=utf-8",
+                config: config
+            )
+            AppLogger.storage.info("云端大屏已发布 \(jsonItems.count) 条（总览 \(galleryJSON.count) 条）")
         } catch {
             // 发布失败不影响主流程，下次上传成功后会再试
             AppLogger.storage.error("云端大屏发布失败: \(error.localizedDescription, privacy: .public)")

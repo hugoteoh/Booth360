@@ -210,6 +210,9 @@ final class LANControlServer {
         case ("GET", "/wall"):
             return ("200 OK", "text/html; charset=utf-8", Data(WallPageHTML.html.utf8))
 
+        case ("GET", "/gallery"):
+            return ("200 OK", "text/html; charset=utf-8", Data(LANGalleryPageHTML.html.utf8))
+
         case ("GET", "/api/renders"):
             return jsonArray(handlers?.renders() ?? [])
 

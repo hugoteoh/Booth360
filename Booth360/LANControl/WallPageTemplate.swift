@@ -161,7 +161,10 @@ enum WallPageTemplate {
               <input id="bgfile" type="file" accept="image/*" style="display:none">
             </div>
             <div class="pfoot">
-              <a id="consoleLink" href="#" style="display:none">打开控制台 →</a>
+              <span>
+                <a id="galleryLink" href="#" target="_blank" style="display:none;margin-right:16px">视频总览 →</a>
+                <a id="consoleLink" href="#" style="display:none">打开控制台 →</a>
+              </span>
               <button class="pclose" id="pclose">关闭</button>
             </div>
           </div>
@@ -326,6 +329,10 @@ enum WallPageTemplate {
         const consoleLink = document.getElementById("consoleLink");
         if (typeof GEAR_HREF === "string" && GEAR_HREF) {
           consoleLink.href = GEAR_HREF; consoleLink.style.display = "inline";
+        }
+        const galleryLink = document.getElementById("galleryLink");
+        if (typeof GALLERY_HREF === "string" && GALLERY_HREF) {
+          galleryLink.href = GALLERY_HREF; galleryLink.style.display = "inline";
         }
 
         // —— 渲染 ——

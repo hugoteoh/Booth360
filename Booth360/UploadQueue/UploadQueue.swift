@@ -258,16 +258,18 @@ final class UploadQueue {
             predicate: predicate,
             sortBy: [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)]
         )
-        descriptor.fetchLimit = 30
-        let items = ((try? modelContext.fetch(descriptor)) ?? []).map { render in
+        // 视频总览要全量（上限 500 防极端），大屏节目单取前 30
+        descriptor.fetchLimit = 500
+        let all = ((try? modelContext.fetch(descriptor)) ?? []).map { render in
             CloudWallPublisher.WallItem(
                 id: render.id,
                 createdAt: render.createdAt,
                 fileName: render.fileName
             )
         }
+        let items = Array(all.prefix(30))
         // 空列表也发布：切到还没拍的活动时，大屏回到「等待」画面而不是残留上一场
-        Task { await CloudWallPublisher.publish(items: items) }
+        Task { await CloudWallPublisher.publish(items: items, galleryItems: all) }
     }
 
     private func makeBackend() -> UploadBackend? {

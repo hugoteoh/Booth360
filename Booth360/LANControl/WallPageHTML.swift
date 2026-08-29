@@ -6,6 +6,7 @@ enum WallPageHTML {
     static let html = WallPageTemplate.page(variantJS: """
     const REFRESH_MS = 3000;
     const GEAR_HREF = "/";
+    const GALLERY_HREF = "/gallery";
     async function fetchItems() {
       const data = await (await fetch("/api/renders")).json();
       return data.map(item => ({

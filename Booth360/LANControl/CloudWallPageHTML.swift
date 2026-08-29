@@ -6,6 +6,7 @@ enum CloudWallPageHTML {
     static let html = WallPageTemplate.page(variantJS: """
     const REFRESH_MS = 5000;
     const GEAR_HREF = "";
+    const GALLERY_HREF = "./gallery.html";
     async function fetchItems() {
       const response = await fetch(`./wall.json?ts=${Date.now()}`, { cache: "no-store" });
       const manifest = await response.json();

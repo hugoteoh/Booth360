@@ -130,7 +130,8 @@ struct RootView: View {
                 var descriptor = FetchDescriptor<RenderedVideo>(
                     predicate: predicate,
                     sortBy: [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)])
-                descriptor.fetchLimit = 30
+                // 大屏页自己只取前 8；放宽到 200 供 /gallery 视频总览列全量
+                descriptor.fetchLimit = 200
                 let items = (try? modelContext.fetch(descriptor)) ?? []
                 let formatter = DateFormatter()
                 formatter.dateFormat = "HH:mm"
