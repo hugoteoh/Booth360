@@ -150,6 +150,8 @@ enum WallPageTemplate {
             <h3>大屏设置</h3>
             <div class="psec">布局模式</div>
             <div id="popts"></div>
+            <div class="psec">性能</div>
+            <div id="pperf"></div>
             <div class="psec">背景</div>
             <div class="bgrow" id="bgrow"></div>
             <div class="bgimg">
@@ -182,6 +184,10 @@ enum WallPageTemplate {
         let mode = "grid";
         try { const m = localStorage.getItem("booth360.wall.mode");
               if (MODES.some(x => x.key === m)) mode = m; } catch (e) {}
+
+        // 流畅模式：网格只播最新 4 条，其余静态首帧（弱电脑解不动 8 路 1080p 时开）
+        let smooth = false;
+        try { smooth = localStorage.getItem("booth360.wall.smooth") === "1"; } catch (e) {}
 
         let items = [];
         let sig = "";           // id+qr 指纹：没变就不动 DOM（视频不重启）
@@ -296,8 +302,24 @@ enum WallPageTemplate {
           buildPanel();
           render();
         }
+        function buildPerf() {
+          const box = document.getElementById("pperf");
+          box.innerHTML = "";
+          const b = document.createElement("button");
+          b.className = "popt" + (smooth ? " active" : "");
+          b.innerHTML = `<span class="ic">⚡</span><span>流畅模式` +
+            `<small>大屏电脑卡顿时开：网格只播放最新 4 条，其余显示静态首帧</small></span>`;
+          b.onclick = () => {
+            smooth = !smooth;
+            try { localStorage.setItem("booth360.wall.smooth", smooth ? "1" : "0"); } catch (e) {}
+            buildPerf();
+            if (mode === "grid") gridSync();
+          };
+          box.appendChild(b);
+        }
+
         document.getElementById("gear").onclick = () => {
-          buildPanel(); buildBGRow(); panel.classList.add("open");
+          buildPanel(); buildPerf(); buildBGRow(); panel.classList.add("open");
         };
         document.getElementById("pclose").onclick = () => panel.classList.remove("open");
         panel.onclick = (e) => { if (e.target === panel) panel.classList.remove("open"); };
@@ -326,16 +348,101 @@ enum WallPageTemplate {
           cineBar.style.display = "none";
         }
 
+        // —— 网格：增量更新（已有视频不重建、新卡错峰加载，避免 8 路同时解码的卡顿） ——
+        const gridKnown = new Map(); // id -> { el, hasQR, playing }
+
+        function gridCardEl(item, i) {
+          const el = document.createElement("div");
+          el.className = "wcell";
+          el.style.setProperty("--i", i % 12);
+          el.innerHTML = `<video muted playsinline></video>
+            <div class="qrbox">${qrHTML(item)}</div>`;
+          return el;
+        }
+
+        /// 设置某张卡播放或静态首帧；delayMs 用于错峰，避免多路视频同时开载
+        function setCardPlayback(entry, item, shouldPlay, delayMs) {
+          entry.playing = shouldPlay;
+          const v = entry.el.querySelector("video");
+          setTimeout(() => {
+            if (entry.playing !== shouldPlay || !v.isConnected) return;
+            v.autoplay = shouldPlay; v.loop = shouldPlay;
+            v.preload = shouldPlay ? "auto" : "metadata";
+            const src = shouldPlay ? item.videoURL : item.videoURL + "#t=0.1";
+            if (v.getAttribute("src") !== src) v.src = src;
+            if (shouldPlay) {
+              // 动态插入的元素一次 play() 可能太早被吞：数据到位后再补一次
+              const tryPlay = () => {
+                if (entry.playing && v.paused) {
+                  const p = v.play(); if (p && p.catch) p.catch(() => {});
+                }
+              };
+              v.addEventListener("loadeddata", tryPlay, { once: true });
+              tryPlay();
+            } else {
+              v.pause();
+            }
+          }, delayMs || 0);
+        }
+
+        // 巡检：应播未播的（起播被吞 / 解码偶发卡停）每 4 秒救一次
+        setInterval(() => {
+          if (mode !== "grid") return;
+          for (const entry of gridKnown.values()) {
+            const v = entry.el.querySelector("video");
+            if (entry.playing && v.paused && v.readyState >= 2) {
+              const p = v.play(); if (p && p.catch) p.catch(() => {});
+            }
+          }
+        }, 4000);
+
+        function gridSync() {
+          if (stage.dataset.rendered !== "grid") {
+            stage.innerHTML = ""; gridKnown.clear(); stage.dataset.rendered = "grid";
+          }
+          // 移除已不在节目单里的
+          for (const [id, entry] of Array.from(gridKnown)) {
+            if (!items.some(x => x.id === id)) { entry.el.remove(); gridKnown.delete(id); }
+          }
+          // 新增的插到最前（其余卡片完全不动，播放不中断）
+          const fresh = items.filter(x => !gridKnown.has(x.id));
+          for (const item of fresh.slice().reverse()) {
+            const el = gridCardEl(item, gridKnown.size);
+            stage.prepend(el);
+            gridKnown.set(item.id, { el, hasQR: !!item.qrURL, playing: null });
+          }
+          // 上传完成 → 二维码原位浮现
+          for (const item of items) {
+            const entry = gridKnown.get(item.id);
+            if (entry && !entry.hasQR && item.qrURL) {
+              entry.el.querySelector(".qrbox").innerHTML = qrHTML(item);
+              entry.hasQR = true;
+            }
+          }
+          // 播放策略：流畅模式只播最新 4 条；需要变更的卡按 300ms 错峰执行
+          const limit = smooth ? 4 : Infinity;
+          let stagger = 0;
+          items.forEach((item, idx) => {
+            const entry = gridKnown.get(item.id);
+            if (!entry) return;
+            const shouldPlay = idx < limit;
+            const loaded = !!entry.el.querySelector("video").getAttribute("src");
+            if (!loaded || entry.playing !== shouldPlay) {
+              setCardPlayback(entry, item, shouldPlay, stagger);
+              stagger += 300;
+            }
+          });
+        }
+
         function render() {
           stopCine();
           stage.className = "m-" + mode;
-          stage.style.gridTemplateColumns = "";
-          stage.style.gridTemplateRows = "";
-          if (!items.length) { stage.innerHTML = ""; return; }
+          if (mode !== "grid") { gridKnown.clear(); stage.dataset.rendered = mode; }
+          if (!items.length) { stage.innerHTML = ""; gridKnown.clear(); return; }
 
           if (mode === "grid") {
-            // 卡片尺寸由 CSS 固定为 8 格布局的大小，数量少也不放大
-            stage.innerHTML = items.map((x, i) => cardHTML(x, i)).join("");
+            gridSync();
+            return; // 播放由 gridSync 的错峰逻辑负责，不走 nudgePlay
 
           } else if (mode === "featured") {
             const hero = items[0];
