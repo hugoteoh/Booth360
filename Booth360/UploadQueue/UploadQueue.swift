@@ -214,9 +214,31 @@ final class UploadQueue {
         set { UserDefaults.standard.set(newValue, forKey: "booth360.cloudWallEnabled") }
     }
 
-    /// 手动触发云端大屏刷新（隐藏/取消隐藏某条后调用）。
+    /// 手动触发云端大屏刷新（隐藏/取消隐藏/删除成品后调用）。
     func republishWall() {
         publishCloudWallIfNeeded()
+    }
+
+    /// 删除成品时清理它在 COS 上的对象（视频 / 落地页 / 二维码，尽力而为，不阻塞删除）。
+    /// 调用后记得再调 republishWall() 让大屏节目单同步减掉这条。
+    func cleanupRemoteObjects(id: UUID, fileName: String, wasUploaded: Bool) {
+        guard wasUploaded, UploadMode.current == .cos else { return }
+        let config = COSConfig.load()
+        guard config.isComplete else { return }
+        let baseKey = "booth360/\(id.uuidString.lowercased())"
+        let keys = ["\(baseKey)/\(fileName)", "\(baseKey)/index.html", "\(baseKey)/qr.png"]
+        Task.detached {
+            for key in keys {
+                guard let url = COSSigner.signedURL(
+                    config: config, objectKey: key, method: "delete", expiresSeconds: 600) else {
+                    continue
+                }
+                var request = URLRequest(url: url)
+                request.httpMethod = "DELETE"
+                request.timeoutInterval = 30
+                _ = try? await URLSession.shared.data(for: request)
+            }
+        }
     }
 
     /// COS 模式且开关打开时，把最近 30 条已上传成品（未隐藏的）发布/刷新到云端大屏。

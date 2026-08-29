@@ -123,9 +123,16 @@ struct RenderDetailView: View {
         .confirmationDialog("确认删除这个成品？源片段不受影响。",
                             isPresented: $showDeleteConfirm, titleVisibility: .visible) {
             Button("删除", role: .destructive) {
+                let renderID = render.id
+                let fileName = render.fileName
+                let wasUploaded = render.uploadState == .done
                 storage.deleteFileIfExists(at: fileURL)
                 modelContext.delete(render)
                 try? modelContext.save()
+                // 清理云端文件 + 大屏节目单同步减掉这条
+                uploadQueue.cleanupRemoteObjects(
+                    id: renderID, fileName: fileName, wasUploaded: wasUploaded)
+                uploadQueue.republishWall()
                 dismiss()
             }
         }

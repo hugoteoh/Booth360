@@ -136,9 +136,14 @@ struct RenderListView: View {
     private func deleteRenders(at offsets: IndexSet) {
         for index in offsets {
             let render = renders[index]
+            uploadQueue.cleanupRemoteObjects(
+                id: render.id, fileName: render.fileName,
+                wasUploaded: render.uploadState == .done)
             storage.deleteFileIfExists(at: storage.renderURL(fileName: render.fileName))
             modelContext.delete(render)
         }
         try? modelContext.save()
+        // 大屏节目单同步减掉删除的条目
+        uploadQueue.republishWall()
     }
 }
