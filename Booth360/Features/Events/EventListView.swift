@@ -10,6 +10,7 @@ struct EventListView: View {
 
     @Query(sort: \EventTemplate.updatedAt, order: .reverse) private var events: [EventTemplate]
     @Environment(\.modelContext) private var modelContext
+    @Environment(UploadQueue.self) private var uploadQueue
     @State private var activeEventID: UUID? = EventManager.activeEventID
     /// 编辑页改为程序化跳转，避免 NavigationLink 内嵌 ▶ 按钮导致
     /// push 与 fullScreenCover 同时触发把界面卡死（黑屏）。
@@ -113,8 +114,7 @@ struct EventListView: View {
                 Label("复制", systemImage: "doc.on.doc")
             }
             Button {
-                EventManager.activeEventID = event.id
-                activeEventID = event.id
+                activate(event)
             } label: {
                 Label("设为当前", systemImage: "checkmark.circle")
             }
@@ -122,8 +122,7 @@ struct EventListView: View {
         }
         .contextMenu {
             Button {
-                EventManager.activeEventID = event.id
-                activeEventID = event.id
+                activate(event)
             } label: {
                 Label("设为当前", systemImage: "checkmark.circle")
             }
@@ -139,6 +138,13 @@ struct EventListView: View {
                 Label("删除", systemImage: "trash")
             }
         }
+    }
+
+    /// 设为当前活动，并让云端大屏立即切到该活动的节目单。
+    private func activate(_ event: EventTemplate) {
+        EventManager.activeEventID = event.id
+        activeEventID = event.id
+        uploadQueue.republishWall()
     }
 
     private func createEvent() {

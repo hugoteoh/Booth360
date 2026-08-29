@@ -25,10 +25,11 @@ enum CloudWallPublisher {
         return "https://\(config.publicHost)/booth360/wall/index.html"
     }
 
-    /// 发布/刷新云端大屏。items 传最近的已上传成品（新→旧）。
+    /// 发布/刷新云端大屏。items 传最近的已上传成品（新→旧）；
+    /// 空列表也照常发布（大屏显示等待画面），用于切换活动后清空上一场的节目单。
     static func publish(items: [WallItem]) async {
         let config = COSConfig.load()
-        guard config.isComplete, !items.isEmpty else { return }
+        guard config.isComplete else { return }
 
         do {
             // 每次发布对全部条目重新签名 + 重生成二维码：链接永远新鲜（各 7 天有效期从现在起算）

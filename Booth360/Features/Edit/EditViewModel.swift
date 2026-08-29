@@ -189,7 +189,8 @@ final class EditViewModel {
                 width: Int(result.renderSize.width),
                 height: Int(result.renderSize.height),
                 settingsSummary: settings.summaryText,
-                sourceClipID: clip.id
+                sourceClipID: clip.id,
+                eventID: EventManager.activeEventID
             )
             modelContext.insert(rendered)
             try? modelContext.save()

@@ -41,7 +41,14 @@ struct COSConfig {
         )
     }
 
-    func save() {
+    /// 保存时去掉每个字段的首尾空白/换行——手机上粘贴密钥经常带尾巴，
+    /// 会导致签名 403（SignatureDoesNotMatch）且极难排查。
+    mutating func save() {
+        region = region.trimmingCharacters(in: .whitespacesAndNewlines)
+        bucket = bucket.trimmingCharacters(in: .whitespacesAndNewlines)
+        secretId = secretId.trimmingCharacters(in: .whitespacesAndNewlines)
+        secretKey = secretKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        customDomain = customDomain.trimmingCharacters(in: .whitespacesAndNewlines)
         let defaults = UserDefaults.standard
         defaults.set(region, forKey: Key.region)
         defaults.set(bucket, forKey: Key.bucket)

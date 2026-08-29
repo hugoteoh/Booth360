@@ -100,6 +100,8 @@ struct RootView: View {
                 descriptor.fetchLimit = 1
                 guard (try? modelContext.fetch(descriptor).first) != nil else { return false }
                 EventManager.activeEventID = id
+                // 云端大屏立即切到该活动的节目单
+                uploadQueue.republishWall()
                 return true
             },
             openGuest: {
@@ -118,8 +120,15 @@ struct RootView: View {
                 return true
             },
             renders: {
+                // 大屏跟当前活动：只列当前活动的成品（未选活动时显示全部）
+                let predicate: Predicate<RenderedVideo>
+                if let activeID = EventManager.activeEventID {
+                    predicate = #Predicate { $0.hiddenFromWall == false && $0.eventID == activeID }
+                } else {
+                    predicate = #Predicate { $0.hiddenFromWall == false }
+                }
                 var descriptor = FetchDescriptor<RenderedVideo>(
-                    predicate: #Predicate { $0.hiddenFromWall == false },
+                    predicate: predicate,
                     sortBy: [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)])
                 descriptor.fetchLimit = 30
                 let items = (try? modelContext.fetch(descriptor)) ?? []

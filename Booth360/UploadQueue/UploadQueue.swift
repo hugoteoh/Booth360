@@ -220,10 +220,20 @@ final class UploadQueue {
     }
 
     /// COS 模式且开关打开时，把最近 30 条已上传成品（未隐藏的）发布/刷新到云端大屏。
+    /// 大屏跟着「当前活动」走：只发布当前活动的成品，切活动后重新发布即切换节目单。
     private func publishCloudWallIfNeeded() {
         guard UploadMode.current == .cos, Self.cloudWallEnabled else { return }
+        let predicate: Predicate<RenderedVideo>
+        if let activeID = EventManager.activeEventID {
+            predicate = #Predicate {
+                $0.uploadStateRawValue == "done" && $0.hiddenFromWall == false
+                    && $0.eventID == activeID
+            }
+        } else {
+            predicate = #Predicate { $0.uploadStateRawValue == "done" && $0.hiddenFromWall == false }
+        }
         var descriptor = FetchDescriptor<RenderedVideo>(
-            predicate: #Predicate { $0.uploadStateRawValue == "done" && $0.hiddenFromWall == false },
+            predicate: predicate,
             sortBy: [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)]
         )
         descriptor.fetchLimit = 30
@@ -234,7 +244,7 @@ final class UploadQueue {
                 fileName: render.fileName
             )
         }
-        guard !items.isEmpty else { return }
+        // 空列表也发布：切到还没拍的活动时，大屏回到「等待」画面而不是残留上一场
         Task { await CloudWallPublisher.publish(items: items) }
     }
 
