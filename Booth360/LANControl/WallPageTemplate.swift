@@ -56,10 +56,13 @@ enum WallPageTemplate {
                             to{opacity:1;transform:none}}
           @keyframes wallGlow{0%,100%{filter:brightness(.95)}50%{filter:brightness(1.06)}}
 
-          /* 模式一：网格 */
-          #stage.m-grid{position:fixed;inset:0;display:grid;gap:clamp(12px,1.3vw,22px);
+          /* 模式一：网格 —— 固定按 8 格（4×2）的卡片尺寸排版：
+             视频少时不放大（避免撑爆挤掉二维码），不满一排自动居中 */
+          #stage.m-grid{position:fixed;inset:0;display:flex;flex-wrap:wrap;
+                gap:clamp(12px,1.3vw,22px);
                 padding:clamp(28px,4vh,56px) clamp(36px,4vw,70px);
                 justify-content:center;align-content:center;perspective:2200px}
+          #stage.m-grid .wcell{height:calc((100% - clamp(12px,1.3vw,22px)) / 2)}
 
           /* 模式二：最新主打（最大在中上，其余小卡在下） */
           #stage.m-featured{position:fixed;inset:0;display:flex;flex-direction:column;
@@ -331,12 +334,8 @@ enum WallPageTemplate {
           if (!items.length) { stage.innerHTML = ""; return; }
 
           if (mode === "grid") {
+            // 卡片尺寸由 CSS 固定为 8 格布局的大小，数量少也不放大
             stage.innerHTML = items.map((x, i) => cardHTML(x, i)).join("");
-            const n = items.length;
-            const cols = Math.max(2, Math.min(6, Math.ceil(Math.sqrt(Math.max(1, n) * 16 / 9))));
-            stage.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-            stage.style.gridTemplateRows =
-              `repeat(${Math.max(1, Math.ceil(n / cols))}, minmax(0, 1fr))`;
 
           } else if (mode === "featured") {
             const hero = items[0];
