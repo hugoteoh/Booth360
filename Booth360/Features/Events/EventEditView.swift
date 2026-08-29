@@ -34,15 +34,22 @@ struct EventEditView: View {
                         value: $event.autoReturnSeconds, in: 5...120, step: 5)
             }
 
-            Section("品牌素材") {
-                assetPickerRow(title: "Logo", fileName: event.logoFileName, item: $logoPickerItem)
-                assetPickerRow(title: "欢迎页背景", fileName: event.backgroundFileName, item: $backgroundPickerItem)
-                assetPickerRow(title: "Overlay（透明 PNG）", fileName: event.overlayFileName, item: $overlayPickerItem)
+            Section {
+                assetPickerRow(title: "Logo", fileName: event.logoFileName,
+                               item: $logoPickerItem, kind: .logo)
+                assetPickerRow(title: "欢迎页背景", fileName: event.backgroundFileName,
+                               item: $backgroundPickerItem, kind: .background)
+                assetPickerRow(title: "Overlay（透明 PNG）", fileName: event.overlayFileName,
+                               item: $overlayPickerItem, kind: .overlay)
                 fileAssetRow(title: "背景音乐", value: event.musicDisplayName, kind: .music)
                 fileAssetRow(title: "动态 Overlay（透明 HEVC 视频）",
                              value: event.overlayVideoFileName, kind: .overlayVideo)
                 fileAssetRow(title: "片头视频（Intro）", value: event.introFileName, kind: .intro)
                 fileAssetRow(title: "片尾视频（Outro）", value: event.outroFileName, kind: .outro)
+            } header: {
+                Text("品牌素材")
+            } footer: {
+                Text("长按已设置的素材行可移除。")
             }
 
             // 镜头/帧率/倒数在拍摄页直接调（右上角光圈菜单 + 底部倒数胶囊），不进活动模板
@@ -162,7 +169,8 @@ struct EventEditView: View {
     private func assetPickerRow(
         title: String,
         fileName: String?,
-        item: Binding<PhotosPickerItem?>
+        item: Binding<PhotosPickerItem?>,
+        kind: EventManager.AssetKind
     ) -> some View {
         PhotosPicker(selection: item, matching: .images) {
             HStack {
@@ -177,6 +185,15 @@ struct EventEditView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 } else {
                     Text("未设置").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .contextMenu {
+            if fileName != nil {
+                Button(role: .destructive) {
+                    removeAsset(kind)
+                } label: {
+                    Label("移除\(title)", systemImage: "trash")
                 }
             }
         }
@@ -217,6 +234,29 @@ struct EventEditView: View {
             }
         }
         .foregroundStyle(.primary)
+        .contextMenu {
+            if value != nil {
+                Button(role: .destructive) {
+                    removeAsset(kind)
+                } label: {
+                    Label("移除\(title)", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    /// 移除素材：删文件 + 清字段，并关掉对应效果开关。
+    private func removeAsset(_ kind: EventManager.AssetKind) {
+        manager.removeAsset(kind: kind, from: event)
+        switch kind {
+        case .overlay: effectDraft.overlayEnabled = false
+        case .music: effectDraft.musicEnabled = false
+        case .overlayVideo: effectDraft.overlayVideoEnabled = false
+        case .intro: effectDraft.introEnabled = false
+        case .outro: effectDraft.outroEnabled = false
+        case .logo, .background: break
+        }
+        try? modelContext.save()
     }
 
     private func importFile(_ result: Result<URL, Error>, kind: EventManager.AssetKind) {

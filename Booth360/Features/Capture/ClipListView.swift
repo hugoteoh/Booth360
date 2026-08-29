@@ -10,6 +10,8 @@ struct ClipListView: View {
     @Query(sort: \SourceClip.createdAt, order: .reverse) private var clips: [SourceClip]
     @Environment(\.modelContext) private var modelContext
     @State private var playingURL: IdentifiableURL?
+    /// 列表编辑模式（显式删除入口；左滑删除仍然可用）。
+    @State private var editMode: EditMode = .inactive
 
     var body: some View {
         Group {
@@ -26,10 +28,20 @@ struct ClipListView: View {
                     }
                     .onDelete(perform: deleteClips)
                 }
+                .environment(\.editMode, $editMode)
             }
         }
         .navigationTitle("源片段（\(clips.count)）")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if !clips.isEmpty {
+                    Button(editMode == .active ? "完成" : "编辑") {
+                        withAnimation { editMode = editMode == .active ? .inactive : .active }
+                    }
+                }
+            }
+        }
         .sheet(item: $playingURL) { item in
             VideoPlayerSheet(url: item.url)
         }
@@ -71,8 +83,36 @@ struct ClipListView: View {
                 }
             }
         }
-        .disabled(!exists)
+        .disabled(!exists && editMode != .active)
         .foregroundStyle(exists ? .primary : .secondary)
+        .contextMenu {
+            if exists {
+                Button {
+                    playingURL = IdentifiableURL(url: url)
+                } label: {
+                    Label("播放", systemImage: "play.fill")
+                }
+            }
+            Button(role: .destructive) {
+                delete(clip)
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                delete(clip)
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
+    }
+
+    /// 删除源片段：连同视频文件一起删（已生成的成品不受影响）。
+    private func delete(_ clip: SourceClip) {
+        storage.deleteFileIfExists(at: storage.sourceClipURL(fileName: clip.fileName))
+        modelContext.delete(clip)
+        try? modelContext.save()
     }
 
     private func deleteClips(at offsets: IndexSet) {

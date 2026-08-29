@@ -131,6 +131,33 @@ struct EventManager {
         return fileName
     }
 
+    /// 移除某类素材：删文件 + 清空字段（音乐同时清显示名）。
+    func removeAsset(kind: AssetKind, from event: EventTemplate) {
+        let fileName: String?
+        switch kind {
+        case .logo: fileName = event.logoFileName
+        case .background: fileName = event.backgroundFileName
+        case .overlay: fileName = event.overlayFileName
+        case .music: fileName = event.musicFileName
+        case .overlayVideo: fileName = event.overlayVideoFileName
+        case .intro: fileName = event.introFileName
+        case .outro: fileName = event.outroFileName
+        }
+        if let fileName {
+            try? FileManager.default.removeItem(at: assetURL(event: event, fileName: fileName))
+        }
+        switch kind {
+        case .logo: event.logoFileName = nil
+        case .background: event.backgroundFileName = nil
+        case .overlay: event.overlayFileName = nil
+        case .music: event.musicFileName = nil; event.musicDisplayName = nil
+        case .overlayVideo: event.overlayVideoFileName = nil
+        case .intro: event.introFileName = nil
+        case .outro: event.outroFileName = nil
+        }
+        event.updatedAt = Date()
+    }
+
     private func apply(fileName: String, kind: AssetKind, to event: EventTemplate) {
         switch kind {
         case .logo: event.logoFileName = fileName
