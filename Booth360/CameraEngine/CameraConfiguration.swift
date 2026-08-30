@@ -1,24 +1,42 @@
 import Foundation
 import AVFoundation
 
-/// 拍摄镜头。
+/// 拍摄镜头 / 焦段。
+/// 0.5× 与 1× 是物理镜头；1.5×/2×/3× 在主摄上用传感器裁切变焦实现
+/// （与系统相机 App 的 2× 同原理，高帧率与防抖全部保留，1080p 输出画质无感损失）。
 enum CameraLens: String, CaseIterable, Identifiable, Codable {
-    case wide
     case ultraWide
+    case wide
+    case wide1_5
+    case wide2
+    case wide3
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .wide: return "广角 1×"
         case .ultraWide: return "超广角 0.5×"
+        case .wide: return "广角 1×"
+        case .wide1_5: return "1.5×"
+        case .wide2: return "2×"
+        case .wide3: return "3×"
         }
     }
 
     var deviceType: AVCaptureDevice.DeviceType {
         switch self {
-        case .wide: return .builtInWideAngleCamera
         case .ultraWide: return .builtInUltraWideCamera
+        case .wide, .wide1_5, .wide2, .wide3: return .builtInWideAngleCamera
+        }
+    }
+
+    /// 在所选物理镜头上应用的变焦倍率。
+    var zoomFactor: CGFloat {
+        switch self {
+        case .ultraWide, .wide: return 1.0
+        case .wide1_5: return 1.5
+        case .wide2: return 2.0
+        case .wide3: return 3.0
         }
     }
 }

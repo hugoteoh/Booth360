@@ -192,6 +192,11 @@ final class CameraEngine {
         if device.isSmoothAutoFocusSupported {
             device.isSmoothAutoFocusEnabled = true
         }
+        // 焦段变焦（1.5×/2×/3× 为主摄裁切；须在设定 activeFormat 之后应用）
+        device.videoZoomFactor = min(
+            max(configuration.lens.zoomFactor, device.minAvailableVideoZoomFactor),
+            device.maxAvailableVideoZoomFactor
+        )
         device.unlockForConfiguration()
 
         // 音频输入
