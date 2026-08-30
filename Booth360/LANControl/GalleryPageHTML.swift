@@ -45,6 +45,7 @@ enum GalleryPageTemplate {
         <header>
           <h1>视频总览</h1>
           <span class="sub" id="count">加载中…</span>
+          <button class="dl" id="dlall" style="margin-left:auto" disabled>下载全部 ZIP</button>
         </header>
         <div id="grid"></div>
         <div class="empty" id="empty" style="display:none">还没有视频</div>
@@ -55,6 +56,8 @@ enum GalleryPageTemplate {
         <script>
         const grid = document.getElementById("grid");
         let sig = "";
+        let lastItems = [];
+        let zipBusy = false;
 
         function cardHTML(item) {
           // 不直接给 src：滚到视口附近才加载首帧（171 条也秒开）
@@ -124,14 +127,126 @@ enum GalleryPageTemplate {
         async function load() {
           try {
             const items = await fetchGalleryItems();
+            lastItems = items;
             document.getElementById("count").textContent = `共 ${items.length} 条`;
             document.getElementById("empty").style.display = items.length ? "none" : "block";
+            document.getElementById("dlall").disabled = !items.length || zipBusy;
             const s = items.map(x => x.id).join(",");
             if (s !== sig) { sig = s; grid.innerHTML = items.map(cardHTML).join(""); observeLazy(); }
           } catch (e) { /* 网络抖动，下轮再试 */ }
         }
         load();
         setInterval(load, REFRESH_MS);
+
+        // —— 一键打包下载全部（STORE 型 ZIP，视频本身已压缩无需再压） ——
+        // Chrome/Edge 桌面：File System Access API 流式写盘，内存只占一条视频；
+        // 其他浏览器：内存拼装后一次性保存（超大时给出提示）。
+        const CRC_TABLE = (() => {
+          const t = new Uint32Array(256);
+          for (let n = 0; n < 256; n++) {
+            let c = n;
+            for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+            t[n] = c >>> 0;
+          }
+          return t;
+        })();
+        function crc32(buf) {
+          let c = 0xFFFFFFFF;
+          for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+          return (c ^ 0xFFFFFFFF) >>> 0;
+        }
+        function le16(v) { return [v & 255, (v >>> 8) & 255]; }
+        function le32(v) { return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]; }
+        function dosDateTime(d) {
+          return {
+            time: ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF,
+            date: (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF,
+          };
+        }
+
+        document.getElementById("dlall").addEventListener("click", async () => {
+          if (zipBusy || !lastItems.length) return;
+          const button = document.getElementById("dlall");
+          zipBusy = true; button.disabled = true;
+          const items = lastItems.slice();
+          const zipName = "booth360-videos.zip";
+          try {
+            // 输出端：优先流式写盘
+            let writable = null;
+            const parts = [];
+            if (window.showSaveFilePicker) {
+              const handle = await showSaveFilePicker({
+                suggestedName: zipName,
+                types: [{ description: "ZIP", accept: { "application/zip": [".zip"] } }],
+              });
+              writable = await (await handle).createWritable();
+            }
+            const writeOut = async (u8) => { if (writable) await writable.write(u8); else parts.push(u8); };
+
+            const encoder = new TextEncoder();
+            const now = dosDateTime(new Date());
+            const central = [];
+            let offset = 0, packed = 0, failed = 0;
+            const LIMIT = 3800 * 1024 * 1024; // zip32 安全上限
+
+            for (let i = 0; i < items.length; i++) {
+              button.textContent = `打包中 ${i + 1}/${items.length}`;
+              let data;
+              try {
+                data = new Uint8Array(await (await fetch(items[i].videoURL)).arrayBuffer());
+              } catch (e) { failed++; continue; }
+              if (offset + data.length > LIMIT) { failed += items.length - i; break; }
+              const safeTime = (items[i].time || String(i)).replace(/[^0-9A-Za-z-]/g, "");
+              const nameBytes = encoder.encode(`booth360-${safeTime}-${i + 1}.mp4`);
+              const crc = crc32(data);
+              const header = new Uint8Array([
+                0x50, 0x4B, 0x03, 0x04, ...le16(20), ...le16(0x0800), ...le16(0),
+                ...le16(now.time), ...le16(now.date), ...le32(crc),
+                ...le32(data.length), ...le32(data.length),
+                ...le16(nameBytes.length), ...le16(0), ...nameBytes,
+              ]);
+              await writeOut(header); await writeOut(data);
+              central.push({ nameBytes, crc, size: data.length, offset });
+              offset += header.length + data.length;
+              packed++;
+            }
+
+            // 中央目录
+            let cdSize = 0;
+            for (const e of central) {
+              const entry = new Uint8Array([
+                0x50, 0x4B, 0x01, 0x02, ...le16(20), ...le16(20), ...le16(0x0800), ...le16(0),
+                ...le16(now.time), ...le16(now.date), ...le32(e.crc),
+                ...le32(e.size), ...le32(e.size), ...le16(e.nameBytes.length),
+                ...le16(0), ...le16(0), ...le16(0), ...le16(0), ...le32(0),
+                ...le32(e.offset), ...e.nameBytes,
+              ]);
+              await writeOut(entry); cdSize += entry.length;
+            }
+            await writeOut(new Uint8Array([
+              0x50, 0x4B, 0x05, 0x06, ...le16(0), ...le16(0),
+              ...le16(central.length), ...le16(central.length),
+              ...le32(cdSize), ...le32(offset), ...le16(0),
+            ]));
+
+            if (writable) {
+              await writable.close();
+            } else {
+              const blob = new Blob(parts, { type: "application/zip" });
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob); a.download = zipName;
+              document.body.appendChild(a); a.click(); a.remove();
+              setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+            }
+            button.textContent = failed
+              ? `完成 ${packed} 条（${failed} 条失败/超限）` : `完成 ✓ ${packed} 条`;
+          } catch (e) {
+            // 用户取消保存对话框也会走到这里，恢复即可
+            button.textContent = "下载全部 ZIP";
+          }
+          zipBusy = false; button.disabled = false;
+          setTimeout(() => { button.textContent = "下载全部 ZIP"; }, 6000);
+        });
         </script>
         </body>
         </html>
