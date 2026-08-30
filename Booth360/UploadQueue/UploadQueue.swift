@@ -219,6 +219,32 @@ final class UploadQueue {
         publishCloudWallIfNeeded()
     }
 
+    /// 删除整场活动时清理它的云端大屏/总览页面（4 个清单与页面文件，尽力而为）。
+    func cleanupEventWall(eventID: UUID) {
+        guard UploadMode.current == .cos else { return }
+        let config = COSConfig.load()
+        guard config.isComplete else { return }
+        let folder = eventID.uuidString.lowercased()
+        let keys = [
+            "booth360/wall/\(folder)/wall.json",
+            "booth360/wall/\(folder)/index.html",
+            "booth360/wall/\(folder)/gallery.json",
+            "booth360/wall/\(folder)/gallery.html",
+        ]
+        Task.detached {
+            for key in keys {
+                guard let url = COSSigner.signedURL(
+                    config: config, objectKey: key, method: "delete", expiresSeconds: 600) else {
+                    continue
+                }
+                var request = URLRequest(url: url)
+                request.httpMethod = "DELETE"
+                request.timeoutInterval = 30
+                _ = try? await URLSession.shared.data(for: request)
+            }
+        }
+    }
+
     /// 删除成品时清理它在 COS 上的对象（视频 / 落地页 / 二维码，尽力而为，不阻塞删除）。
     /// 调用后记得再调 republishWall() 让大屏节目单同步减掉这条。
     func cleanupRemoteObjects(id: UUID, fileName: String, wasUploaded: Bool) {

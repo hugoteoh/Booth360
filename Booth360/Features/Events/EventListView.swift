@@ -17,6 +17,8 @@ struct EventListView: View {
     @State private var editingEvent: EventTemplate?
     /// 列表编辑模式（显式删除入口；左滑删除仍然可用）。
     @State private var editMode: EditMode = .inactive
+    /// 待确认删除的活动（删除会连同成品与云端文件，必须确认）。
+    @State private var pendingDeleteEvent: EventTemplate?
 
     private var manager: EventManager { EventManager(storage: storage) }
 
@@ -37,10 +39,7 @@ struct EventListView: View {
                         eventRow(event)
                     }
                     .onDelete { indexSet in
-                        for index in indexSet {
-                            manager.delete(events[index], in: modelContext)
-                        }
-                        activeEventID = EventManager.activeEventID
+                        if let index = indexSet.first { pendingDeleteEvent = events[index] }
                     }
                 }
                 .environment(\.editMode, $editMode)
@@ -64,6 +63,52 @@ struct EventListView: View {
         .navigationDestination(item: $editingEvent) { event in
             EventEditView(event: event, storage: storage)
         }
+        .confirmationDialog(
+            deleteDialogTitle,
+            isPresented: Binding(
+                get: { pendingDeleteEvent != nil },
+                set: { if !$0 { pendingDeleteEvent = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除活动及全部成品", role: .destructive) {
+                if let event = pendingDeleteEvent { performFullDelete(event) }
+                pendingDeleteEvent = nil
+            }
+            Button("取消", role: .cancel) { pendingDeleteEvent = nil }
+        }
+    }
+
+    private var deleteDialogTitle: String {
+        guard let event = pendingDeleteEvent else { return "" }
+        let count = renderCount(of: event)
+        return count > 0
+            ? "删除「\(event.name)」？将同时删除它的 \(count) 条成品（手机 + 云端），二维码与总览链接全部失效，不占腾讯云空间。"
+            : "删除「\(event.name)」？（该活动没有成品）"
+    }
+
+    private func renderCount(of event: EventTemplate) -> Int {
+        let id = event.id
+        let descriptor = FetchDescriptor<RenderedVideo>(predicate: #Predicate { $0.eventID == id })
+        return (try? modelContext.fetchCount(descriptor)) ?? 0
+    }
+
+    /// 整场删除：云端视频/落地页/二维码 + 云端大屏/总览页 + 本地文件与记录 + 活动本体。
+    private func performFullDelete(_ event: EventTemplate) {
+        let eventID = event.id
+        let descriptor = FetchDescriptor<RenderedVideo>(predicate: #Predicate { $0.eventID == eventID })
+        let renders = (try? modelContext.fetch(descriptor)) ?? []
+        for render in renders {
+            uploadQueue.cleanupRemoteObjects(
+                id: render.id, fileName: render.fileName,
+                wasUploaded: render.uploadState == .done)
+            storage.deleteFileIfExists(at: storage.renderURL(fileName: render.fileName))
+            modelContext.delete(render)
+        }
+        uploadQueue.cleanupEventWall(eventID: eventID)
+        manager.delete(event, in: modelContext)
+        activeEventID = EventManager.activeEventID
+        uploadQueue.republishWall()
     }
 
     private func eventRow(_ event: EventTemplate) -> some View {
@@ -103,8 +148,7 @@ struct EventListView: View {
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
-                manager.delete(event, in: modelContext)
-                activeEventID = EventManager.activeEventID
+                pendingDeleteEvent = event
             } label: {
                 Label("删除", systemImage: "trash")
             }
@@ -132,8 +176,7 @@ struct EventListView: View {
                 Label("复制", systemImage: "doc.on.doc")
             }
             Button(role: .destructive) {
-                manager.delete(event, in: modelContext)
-                activeEventID = EventManager.activeEventID
+                pendingDeleteEvent = event
             } label: {
                 Label("删除", systemImage: "trash")
             }
