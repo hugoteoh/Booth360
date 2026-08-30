@@ -26,6 +26,13 @@ struct EventEditView: View {
 
     private var manager: EventManager { EventManager(storage: storage) }
 
+    /// 本活动的云端目录（COS 配好才显示链接）。
+    private var cloudBase: String? {
+        let config = COSConfig.load()
+        guard config.isComplete else { return nil }
+        return "https://\(config.publicHost)/booth360/wall/\(event.id.uuidString.lowercased())"
+    }
+
     var body: some View {
         Form {
             Section("基本信息") {
@@ -128,6 +135,20 @@ struct EventEditView: View {
                 }
                 Picker("编码", selection: $effectDraft.codec) {
                     ForEach(OutputCodec.allCases) { Text($0.displayName).tag($0) }
+                }
+            }
+            if let base = cloudBase {
+                Section {
+                    LabeledContent("大屏", value: "\(base)/index.html")
+                        .textSelection(.enabled)
+                        .font(.caption)
+                    LabeledContent("视频总览", value: "\(base)/gallery.html")
+                        .textSelection(.enabled)
+                        .font(.caption)
+                } header: {
+                    Text("本活动云端链接（长按可复制）")
+                } footer: {
+                    Text("每场活动的链接独立且永久，互不覆盖，可直接发给客户。页内视频链接 7 天有效，App 每次上传/刷新自动续期。")
                 }
             }
         }

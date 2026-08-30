@@ -28,9 +28,14 @@ enum CloudWallPublisher {
     /// 发布/刷新云端大屏。items 传最近的已上传成品（新→旧），galleryItems 传当前活动全部成品
     /// （视频总览页用，签名是本地计算，条数多也不增加网络开销——只多一个 gallery.json 上传）。
     /// 空列表也照常发布（大屏显示等待画面），用于切换活动后清空上一场的节目单。
-    static func publish(items: [WallItem], galleryItems: [WallItem] = []) async {
+    ///
+    /// 多活动结构：每场活动发布到自己的目录 booth360/wall/<eventID>/（URL 永久、互不覆盖）；
+    /// 根目录 index.html 是固定入口（跳转到当前活动），current.json 记录当前活动，
+    /// 活动大屏页自己轮询它、切活动后自动跳转——电视永远只需要开固定入口。
+    static func publish(items: [WallItem], galleryItems: [WallItem] = [], eventID: UUID? = nil) async {
         let config = COSConfig.load()
         guard config.isComplete else { return }
+        let folder = eventID?.uuidString.lowercased() ?? "default"
 
         do {
             // 每次发布对全部条目重新签名 + 重生成二维码：链接永远新鲜（各 7 天有效期从现在起算）
@@ -81,7 +86,7 @@ enum CloudWallPublisher {
             let manifestData = try JSONSerialization.data(withJSONObject: manifest)
             try await putPublicObject(
                 data: manifestData,
-                objectKey: "booth360/wall/wall.json",
+                objectKey: "booth360/wall/\(folder)/wall.json",
                 contentType: "application/json",
                 config: config
             )
@@ -89,7 +94,7 @@ enum CloudWallPublisher {
             // 3. 页面本体（覆盖上传，永远最新版）
             try await putPublicObject(
                 data: Data(CloudWallPageHTML.html.utf8),
-                objectKey: "booth360/wall/index.html",
+                objectKey: "booth360/wall/\(folder)/index.html",
                 contentType: "text/html; charset=utf-8",
                 config: config
             )
@@ -114,21 +119,58 @@ enum CloudWallPublisher {
             ]
             try await putPublicObject(
                 data: try JSONSerialization.data(withJSONObject: galleryManifest),
-                objectKey: "booth360/wall/gallery.json",
+                objectKey: "booth360/wall/\(folder)/gallery.json",
                 contentType: "application/json",
                 config: config
             )
             try await putPublicObject(
                 data: Data(CloudGalleryPageHTML.html.utf8),
+                objectKey: "booth360/wall/\(folder)/gallery.html",
+                contentType: "text/html; charset=utf-8",
+                config: config
+            )
+
+            // 5. 当前活动指针 + 根目录固定入口（跳转壳，电视只需收藏根地址）
+            try await putPublicObject(
+                data: try JSONSerialization.data(withJSONObject: ["event": folder]),
+                objectKey: "booth360/wall/current.json",
+                contentType: "application/json",
+                config: config
+            )
+            try await putPublicObject(
+                data: Data(redirectShell(to: "index.html").utf8),
+                objectKey: "booth360/wall/index.html",
+                contentType: "text/html; charset=utf-8",
+                config: config
+            )
+            try await putPublicObject(
+                data: Data(redirectShell(to: "gallery.html").utf8),
                 objectKey: "booth360/wall/gallery.html",
                 contentType: "text/html; charset=utf-8",
                 config: config
             )
-            AppLogger.storage.info("云端大屏已发布 \(jsonItems.count) 条（总览 \(galleryJSON.count) 条）")
+            AppLogger.storage.info("云端大屏已发布 \(jsonItems.count) 条（总览 \(galleryJSON.count) 条，活动目录 \(folder, privacy: .public)）")
         } catch {
             // 发布失败不影响主流程，下次上传成功后会再试
             AppLogger.storage.error("云端大屏发布失败: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// 根目录跳转壳：读 current.json 后跳到当前活动目录的对应页面。
+    private static func redirectShell(to page: String) -> String {
+        """
+        <!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+        <title>Booth360</title></head>
+        <body style="background:#06080d;color:#8b97a3;font-family:system-ui;
+                     display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+        <div>正在进入当前活动…</div>
+        <script>
+        fetch("./current.json?ts=" + Date.now(), { cache: "no-store" })
+          .then(r => r.json())
+          .then(j => { if (j && j.event) location.replace("./" + j.event + "/\(page)"); })
+          .catch(() => {});
+        </script></body></html>
+        """
     }
 
     /// 带 x-cos-acl: public-read 的 PUT（ACL 头已签名）。TencentCOSBackend 发布落地页也用。

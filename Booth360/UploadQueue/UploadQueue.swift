@@ -268,8 +268,9 @@ final class UploadQueue {
             )
         }
         let items = Array(all.prefix(30))
+        let eventID = EventManager.activeEventID
         // 空列表也发布：切到还没拍的活动时，大屏回到「等待」画面而不是残留上一场
-        Task { await CloudWallPublisher.publish(items: items, galleryItems: all) }
+        Task { await CloudWallPublisher.publish(items: items, galleryItems: all, eventID: eventID) }
     }
 
     private func makeBackend() -> UploadBackend? {

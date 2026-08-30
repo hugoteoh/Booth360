@@ -17,5 +17,20 @@ enum CloudWallPageHTML {
         state: ""
       }));
     }
+    // 大屏跟随当前活动：每 10 秒查 ../current.json，手机上切了活动这里自动跳转
+    (function () {
+      const parts = location.pathname.split("/").filter(Boolean);
+      const myFolder = parts.length >= 2 ? parts[parts.length - 2] : "";
+      if (!myFolder || myFolder === "wall") return; // 根目录跳转壳不参与
+      setInterval(async () => {
+        try {
+          const response = await fetch(`../current.json?ts=${Date.now()}`, { cache: "no-store" });
+          const j = await response.json();
+          if (j && j.event && j.event !== myFolder) {
+            location.replace(`../${j.event}/index.html`);
+          }
+        } catch (e) {}
+      }, 10000);
+    })();
     """)
 }
