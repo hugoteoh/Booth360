@@ -57,13 +57,45 @@ enum GalleryPageTemplate {
         let sig = "";
 
         function cardHTML(item) {
+          // 不直接给 src：滚到视口附近才加载首帧（171 条也秒开）
           return `<div class="card">
-            <video src="${item.videoURL}#t=0.1" controls muted playsinline preload="metadata"></video>
+            <video data-src="${item.videoURL}" controls muted playsinline preload="none"></video>
             <div class="meta">
               <span class="time">${item.time || ""}</span>
               <button class="dl" data-url="${item.videoURL}" data-name="booth360-${(item.time || item.id).replace(/[^0-9A-Za-z-]/g, "")}.mp4">下载</button>
             </div></div>`;
         }
+
+        // 视口懒加载：进入屏幕前 300px 才加载该条的首帧元数据
+        const lazyLoader = new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            const v = entry.target;
+            if (!v.getAttribute("src")) {
+              v.preload = "metadata";
+              v.src = v.dataset.src + "#t=0.1";
+            }
+            lazyLoader.unobserve(v);
+          }
+        }, { rootMargin: "300px 0px" });
+
+        function observeLazy() {
+          // 极老的浏览器不支持 IntersectionObserver 时退回全量加载
+          if (!("IntersectionObserver" in window)) {
+            grid.querySelectorAll("video:not([src])").forEach(v => {
+              v.preload = "metadata"; v.src = v.dataset.src + "#t=0.1";
+            });
+            return;
+          }
+          grid.querySelectorAll("video:not([src])").forEach(v => lazyLoader.observe(v));
+        }
+
+        // 同一时间只播一条：新的一开播，其他全部暂停
+        grid.addEventListener("play", (e) => {
+          grid.querySelectorAll("video").forEach(v => {
+            if (v !== e.target && !v.paused) v.pause();
+          });
+        }, true);
 
         // 下载：fetch → blob → <a download> 强制真下载；失败回退直开文件
         grid.addEventListener("click", (e) => {
@@ -95,7 +127,7 @@ enum GalleryPageTemplate {
             document.getElementById("count").textContent = `共 ${items.length} 条`;
             document.getElementById("empty").style.display = items.length ? "none" : "block";
             const s = items.map(x => x.id).join(",");
-            if (s !== sig) { sig = s; grid.innerHTML = items.map(cardHTML).join(""); }
+            if (s !== sig) { sig = s; grid.innerHTML = items.map(cardHTML).join(""); observeLazy(); }
           } catch (e) { /* 网络抖动，下轮再试 */ }
         }
         load();
