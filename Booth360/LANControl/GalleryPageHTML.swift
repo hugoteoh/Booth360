@@ -51,7 +51,7 @@ enum GalleryPageTemplate {
         </head>
         <body>
         <header>
-          <h1>视频总览</h1>
+          <h1 id="title">视频总览</h1>
           <span class="sub" id="count">加载中…</span>
           <button class="dl" id="dlall" style="margin-left:auto" disabled>下载全部 ZIP</button>
         </header>
@@ -144,6 +144,11 @@ enum GalleryPageTemplate {
           try {
             const items = await fetchGalleryItems();
             lastItems = items;
+            // 活动名放左上角标题（变体在 fetch 时填 galleryTitle）
+            if (typeof galleryTitle === "string" && galleryTitle) {
+              document.getElementById("title").textContent = galleryTitle;
+              document.title = `${galleryTitle} · 视频总览`;
+            }
             document.getElementById("count").textContent = `共 ${items.length} 条`;
             document.getElementById("empty").style.display = items.length ? "none" : "block";
             document.getElementById("dlall").disabled = !items.length || zipBusy;
@@ -274,9 +279,11 @@ enum GalleryPageTemplate {
 enum CloudGalleryPageHTML {
     static let html = GalleryPageTemplate.page(variantJS: """
     const REFRESH_MS = 30000;
+    let galleryTitle = "";
     async function fetchGalleryItems() {
       const response = await fetch(`./gallery.json?ts=${Date.now()}`, { cache: "no-store" });
       const manifest = await response.json();
+      galleryTitle = manifest.event || "";
       return (manifest.items || []).map(item => ({
         id: item.id, time: item.time, videoURL: item.url
       }));
@@ -284,11 +291,16 @@ enum CloudGalleryPageHTML {
     """)
 }
 
-/// 局域网版：数据来自 /api/renders，视频走 /video/<id>。
+/// 局域网版：数据来自 /api/renders，视频走 /video/<id>；活动名取自 /api/status。
 enum LANGalleryPageHTML {
     static let html = GalleryPageTemplate.page(variantJS: """
     const REFRESH_MS = 10000;
+    let galleryTitle = "";
     async function fetchGalleryItems() {
+      try {
+        const status = await (await fetch("/api/status")).json();
+        galleryTitle = status.activeEvent || "";
+      } catch (e) {}
       const data = await (await fetch("/api/renders")).json();
       return data.map(item => ({
         id: item.id, time: item.time, videoURL: `/video/${item.id}`

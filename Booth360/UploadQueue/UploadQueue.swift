@@ -289,7 +289,8 @@ final class UploadQueue {
                     await CloudWallPublisher.publish(
                         items: payload.items,
                         galleryItems: payload.all,
-                        eventID: payload.eventID
+                        eventID: payload.eventID,
+                        eventName: payload.eventName
                     )
                 }
             } while self.wallPublishQueued
@@ -298,8 +299,12 @@ final class UploadQueue {
     }
 
     /// 发布内容以调用瞬间的数据库状态为准（每轮补发都重新取，保证新鲜）。
-    private func buildWallPayload()
-        -> (items: [CloudWallPublisher.WallItem], all: [CloudWallPublisher.WallItem], eventID: UUID?)? {
+    private func buildWallPayload() -> (
+        items: [CloudWallPublisher.WallItem],
+        all: [CloudWallPublisher.WallItem],
+        eventID: UUID?,
+        eventName: String
+    )? {
         let predicate: Predicate<RenderedVideo>
         if let activeID = EventManager.activeEventID {
             predicate = #Predicate {
@@ -323,7 +328,12 @@ final class UploadQueue {
             )
         }
         // 空列表也发布：切到还没拍的活动时，大屏回到「等待」画面而不是残留上一场
-        return (items: Array(all.prefix(30)), all: all, eventID: EventManager.activeEventID)
+        return (
+            items: Array(all.prefix(30)),
+            all: all,
+            eventID: EventManager.activeEventID,
+            eventName: EventManager.activeEvent(in: modelContext)?.name ?? ""
+        )
     }
 
     private func makeBackend() -> UploadBackend? {

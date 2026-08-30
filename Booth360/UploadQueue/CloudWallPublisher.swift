@@ -32,7 +32,12 @@ enum CloudWallPublisher {
     /// 多活动结构：每场活动发布到自己的目录 booth360/wall/<eventID>/（URL 永久、互不覆盖）；
     /// 根目录 index.html 是固定入口（跳转到当前活动），current.json 记录当前活动，
     /// 活动大屏页自己轮询它、切活动后自动跳转——电视永远只需要开固定入口。
-    static func publish(items: [WallItem], galleryItems: [WallItem] = [], eventID: UUID? = nil) async {
+    static func publish(
+        items: [WallItem],
+        galleryItems: [WallItem] = [],
+        eventID: UUID? = nil,
+        eventName: String = ""
+    ) async {
         let config = COSConfig.load()
         guard config.isComplete else { return }
         let folder = eventID?.uuidString.lowercased() ?? "default"
@@ -115,6 +120,7 @@ enum CloudWallPublisher {
             }
             let galleryManifest: [String: Any] = [
                 "updatedAt": Int(Date().timeIntervalSince1970),
+                "event": eventName,
                 "items": galleryJSON,
             ]
             try await putPublicObject(
