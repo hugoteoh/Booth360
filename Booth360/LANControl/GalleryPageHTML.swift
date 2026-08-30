@@ -27,6 +27,14 @@ enum GalleryPageTemplate {
           header .sub{color:#8b97a3;font-size:13px}
           #grid{display:grid;gap:16px;padding:18px 22px 40px;
                 grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+          /* 手机：固定两列更省空间 */
+          @media (max-width:560px){
+            header{padding:12px 14px;gap:10px}
+            header h1{font-size:15px}
+            #grid{grid-template-columns:repeat(2,1fr);gap:10px;padding:12px 12px 30px}
+            .meta{padding:8px 9px}
+            .dl{padding:6px 11px;font-size:12px}
+          }
           .card{background:#0d1117;border:1px solid #1a212b;border-radius:12px;
                 overflow:hidden;display:flex;flex-direction:column}
           .card video{width:100%;aspect-ratio:9/16;object-fit:cover;background:#000;display:block}
@@ -98,6 +106,14 @@ enum GalleryPageTemplate {
           grid.querySelectorAll("video").forEach(v => {
             if (v !== e.target && !v.paused) v.pause();
           });
+        }, true);
+
+        // 自愈：视频加载失败（例如已删除的残留条目）直接隐藏整张卡
+        grid.addEventListener("error", (e) => {
+          if (e.target.tagName === "VIDEO") {
+            const card = e.target.closest(".card");
+            if (card) card.style.display = "none";
+          }
         }, true);
 
         // 下载：fetch → blob → <a download> 强制真下载；失败回退直开文件

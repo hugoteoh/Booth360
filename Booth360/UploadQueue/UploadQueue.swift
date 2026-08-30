@@ -241,10 +241,39 @@ final class UploadQueue {
         }
     }
 
+    @ObservationIgnored private var wallPublishTask: Task<Void, Never>?
+    @ObservationIgnored private var wallPublishQueued = false
+
     /// COS 模式且开关打开时，把最近 30 条已上传成品（未隐藏的）发布/刷新到云端大屏。
     /// 大屏跟着「当前活动」走：只发布当前活动的成品，切活动后重新发布即切换节目单。
+    ///
+    /// 发布是串行的：同一时间只跑一个发布任务，进行中再触发只置标记，
+    /// 结束后用**最新**数据补发一次——避免并发发布时旧快照后写完、把已删条目写回节目单。
     private func publishCloudWallIfNeeded() {
         guard UploadMode.current == .cos, Self.cloudWallEnabled else { return }
+        if wallPublishTask != nil {
+            wallPublishQueued = true
+            return
+        }
+        wallPublishTask = Task { [weak self] in
+            guard let self else { return }
+            repeat {
+                self.wallPublishQueued = false
+                if let payload = self.buildWallPayload() {
+                    await CloudWallPublisher.publish(
+                        items: payload.items,
+                        galleryItems: payload.all,
+                        eventID: payload.eventID
+                    )
+                }
+            } while self.wallPublishQueued
+            self.wallPublishTask = nil
+        }
+    }
+
+    /// 发布内容以调用瞬间的数据库状态为准（每轮补发都重新取，保证新鲜）。
+    private func buildWallPayload()
+        -> (items: [CloudWallPublisher.WallItem], all: [CloudWallPublisher.WallItem], eventID: UUID?)? {
         let predicate: Predicate<RenderedVideo>
         if let activeID = EventManager.activeEventID {
             predicate = #Predicate {
@@ -267,10 +296,8 @@ final class UploadQueue {
                 fileName: render.fileName
             )
         }
-        let items = Array(all.prefix(30))
-        let eventID = EventManager.activeEventID
         // 空列表也发布：切到还没拍的活动时，大屏回到「等待」画面而不是残留上一场
-        Task { await CloudWallPublisher.publish(items: items, galleryItems: all, eventID: eventID) }
+        return (items: Array(all.prefix(30)), all: all, eventID: EventManager.activeEventID)
     }
 
     private func makeBackend() -> UploadBackend? {
