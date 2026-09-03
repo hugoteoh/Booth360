@@ -256,7 +256,7 @@ final class CaptureViewModel {
         // 当前活动开了转台旋转 → 录制起转、录完停
         let spinEnabled = modelContext
             .flatMap { EventManager.activeEvent(in: $0) }?.turntableSpinEnabled == true
-        if spinEnabled { turntable?.sendStart() }
+        if spinEnabled { turntable?.sendStart(seconds: effectiveRecordingSeconds + 3) }
         phase = .recording
         startElapsedTicker()
 

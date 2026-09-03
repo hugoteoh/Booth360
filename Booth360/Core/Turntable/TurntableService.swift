@@ -79,9 +79,12 @@ struct TurntableConfig: Equatable {
     var preset: TurntablePreset = .controller360
     var customServiceUUID: String = ""
     var customWriteUUID: String = ""
-    /// 启动/停止指令（十六进制文本）。默认 01/00，拿到实机后按品牌调。
+    /// 启动/停止指令（十六进制文本）。仅「自定义/通用」预设用；360 Controller 走 MWE 12 字节帧。
     var startHex: String = "01"
     var stopHex: String = "00"
+    /// 360 Controller（MWE 主板）参数：速度档位 1–8（越大越快）、方向（顺/逆时针）。
+    var speedLevel: Int = 5
+    var clockwise: Bool = true
     var rememberedDeviceID: String?
 
     var serviceUUID: String {
@@ -90,6 +93,8 @@ struct TurntableConfig: Equatable {
     var writeUUID: String {
         preset == .custom ? customWriteUUID : preset.defaultWriteUUID
     }
+    /// 该预设是否用 MWE 12 字节帧协议（否则用 startHex/stopHex 原始字节）。
+    var usesMWEFrame: Bool { preset == .controller360 }
 
     private enum Key {
         static let preset = "booth360.turntable.preset"
@@ -97,6 +102,8 @@ struct TurntableConfig: Equatable {
         static let write = "booth360.turntable.writeUUID"
         static let start = "booth360.turntable.startHex"
         static let stop = "booth360.turntable.stopHex"
+        static let speed = "booth360.turntable.speedLevel"
+        static let clockwise = "booth360.turntable.clockwise"
         static let device = "booth360.turntable.deviceID"
     }
 
@@ -111,6 +118,12 @@ struct TurntableConfig: Equatable {
         config.customWriteUUID = defaults.string(forKey: Key.write) ?? ""
         config.startHex = defaults.string(forKey: Key.start) ?? "01"
         config.stopHex = defaults.string(forKey: Key.stop) ?? "00"
+        if defaults.object(forKey: Key.speed) != nil {
+            config.speedLevel = min(max(defaults.integer(forKey: Key.speed), 1), 8)
+        }
+        if defaults.object(forKey: Key.clockwise) != nil {
+            config.clockwise = defaults.bool(forKey: Key.clockwise)
+        }
         config.rememberedDeviceID = defaults.string(forKey: Key.device)
         return config
     }
@@ -122,7 +135,22 @@ struct TurntableConfig: Equatable {
         defaults.set(customWriteUUID, forKey: Key.write)
         defaults.set(startHex, forKey: Key.start)
         defaults.set(stopHex, forKey: Key.stop)
+        defaults.set(speedLevel, forKey: Key.speed)
+        defaults.set(clockwise, forKey: Key.clockwise)
         defaults.set(rememberedDeviceID, forKey: Key.device)
+    }
+
+    /// MWE 360 Controller 12 字节帧：AA CC [方向] [速度] 22 00 [时长s] 11 00 [校验] CC AA
+    /// 校验 = 第 2…8 字节之和的低 8 位。方向 0x11 顺 / 0x22 逆 / 0x33 停；速度 0x11…0x88。
+    static func mweFrame(switchByte: UInt8, speedLevel: Int, seconds: Int) -> Data {
+        let speeds: [UInt8] = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]
+        let sp = speeds[min(max(speedLevel, 1), 8) - 1]
+        let t = UInt8(min(max(seconds, 0), 60))
+        var b: [UInt8] = [0xAA, 0xCC, switchByte, sp, 0x22, 0x00, t, 0x11, 0x00, 0, 0xCC, 0xAA]
+        var sum = 0
+        for i in 2...8 { sum += Int(b[i]) }
+        b[9] = UInt8(sum & 0xFF)
+        return Data(b)
     }
 }
 
@@ -233,35 +261,54 @@ final class TurntableService: NSObject {
 
     // MARK: - 指令
 
-    func sendStart() {
-        send(hex: config.startHex, label: "启动")
+    /// 开始旋转。seconds 为本次录制预计时长（MWE 帧内的自动停止时长，兜底用；
+    /// 我们仍会在录完显式发停止）。
+    func sendStart(seconds: Int = 60) {
+        if config.usesMWEFrame {
+            let sw: UInt8 = config.clockwise ? 0x11 : 0x22
+            sendData(TurntableConfig.mweFrame(switchByte: sw, speedLevel: config.speedLevel,
+                                              seconds: seconds), label: "启动")
+        } else {
+            sendHex(config.startHex, label: "启动")
+        }
     }
 
     func sendStop() {
-        send(hex: config.stopHex, label: "停止")
+        if config.usesMWEFrame {
+            sendData(TurntableConfig.mweFrame(switchByte: 0x33, speedLevel: config.speedLevel,
+                                              seconds: 0), label: "停止")
+        } else {
+            sendHex(config.stopHex, label: "停止")
+        }
     }
 
     /// 测试：转 seconds 秒后自动停。
     func testSpin(seconds: Double = 3) {
-        sendStart()
+        sendStart(seconds: Int(seconds))
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
             self?.sendStop()
         }
     }
 
-    private func send(hex: String, label: String) {
-        guard let peripheral, let characteristic = writeCharacteristic else {
-            lastError = "未连接转台或未找到可写特征"
-            return
-        }
+    private func sendHex(_ hex: String, label: String) {
         guard let data = HexCommand.parse(hex) else {
             lastError = "\(label)指令不是有效的十六进制：\(hex)"
             return
         }
+        sendData(data, label: label)
+    }
+
+    private func sendData(_ data: Data, label: String) {
+        guard let peripheral, let characteristic = writeCharacteristic else {
+            lastError = "未连接转台或未找到可写特征"
+            return
+        }
+        // 360 Controller 的 FFF1 只支持无响应写；有 write 属性时才用带响应写
         let type: CBCharacteristicWriteType =
             characteristic.properties.contains(.write) ? .withResponse : .withoutResponse
         peripheral.writeValue(data, for: characteristic, type: type)
+        let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
         AppLogger.ui.info("转台\(label, privacy: .public)指令已发送: \(hex, privacy: .public)")
     }
 

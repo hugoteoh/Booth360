@@ -158,7 +158,7 @@ final class GuestFlowViewModel {
 
         // 2. 录制（自动停止由引擎 maxRecordedDuration 保证）；转台随录制起转
         if event.turntableSpinEnabled {
-            turntable?.sendStart()
+            turntable?.sendStart(seconds: event.recordingSeconds + 3)
         }
         let sourceURL = storage.newSourceClipURL()
         let totalSeconds = event.recordingSeconds

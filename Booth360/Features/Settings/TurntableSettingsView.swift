@@ -47,6 +47,22 @@ struct TurntableSettingsView: View {
                 }
             }
 
+            if config.usesMWEFrame {
+                Section {
+                    Stepper("旋转速度：\(config.speedLevel) 档（1 慢 – 8 快）",
+                            value: $config.speedLevel, in: 1...8)
+                    Picker("旋转方向", selection: $config.clockwise) {
+                        Text("顺时针").tag(true)
+                        Text("逆时针").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("旋转参数（360 Controller）")
+                } footer: {
+                    Text("这台是「360 Controller」底座（MWE 主板），已内置匹配的控制协议。速度和方向在这里调，拍摄时自动套用。")
+                }
+            }
+
             Section {
                 Picker("协议预设", selection: $config.preset) {
                     ForEach(TurntablePreset.allCases) { preset in
@@ -61,16 +77,18 @@ struct TurntableSettingsView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.characters)
                 }
-                TextField("启动指令（十六进制，如 01 或 A5 01 5A）", text: $config.startHex)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                TextField("停止指令", text: $config.stopHex)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
+                if !config.usesMWEFrame {
+                    TextField("启动指令（十六进制，如 01 或 A5 01 5A）", text: $config.startHex)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    TextField("停止指令", text: $config.stopHex)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
             } header: {
                 Text("协议")
             } footer: {
-                Text("不同品牌的指令不同。默认 01/00 覆盖一部分通用主板；不转就把「设备诊断」里的信息发给开发者定制。")
+                Text("你的转台默认已选「360 Controller」并配好协议，无需改动。换其他品牌转台时才需在此切换预设或填自定义指令。")
             }
 
             Section("测试") {
