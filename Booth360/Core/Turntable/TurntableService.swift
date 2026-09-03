@@ -30,9 +30,11 @@ enum HexCommand {
 
 /// 常见转台主板的协议预设（UUID 组合）。指令字节因品牌而异，在设置页可改。
 enum TurntablePreset: String, CaseIterable, Identifiable {
+    /// 用户实机：「360 Controller_xxxx」底座（KT6368A 模块）——FFF0 服务，FFF1 无响应写+通知
+    case controller360
     /// HM-10/BT05 系透传模块（大量国产转台用这个）
     case uartFFE0
-    /// FFF0 系透传模块
+    /// FFF0 系透传模块（写在 FFF2 的那一类）
     case uartFFF0
     /// Nordic UART Service
     case nordicUART
@@ -43,8 +45,9 @@ enum TurntablePreset: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .controller360: return "360 Controller（FFF0 / FFF1）"
         case .uartFFE0: return "通用 FFE0（HM-10 系）"
-        case .uartFFF0: return "通用 FFF0"
+        case .uartFFF0: return "通用 FFF0（写 FFF2）"
         case .nordicUART: return "Nordic UART"
         case .custom: return "自定义 UUID"
         }
@@ -52,6 +55,7 @@ enum TurntablePreset: String, CaseIterable, Identifiable {
 
     var defaultServiceUUID: String {
         switch self {
+        case .controller360: return "FFF0"
         case .uartFFE0: return "FFE0"
         case .uartFFF0: return "FFF0"
         case .nordicUART: return "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -61,6 +65,7 @@ enum TurntablePreset: String, CaseIterable, Identifiable {
 
     var defaultWriteUUID: String {
         switch self {
+        case .controller360: return "FFF1"
         case .uartFFE0: return "FFE1"
         case .uartFFF0: return "FFF2"
         case .nordicUART: return "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -71,7 +76,7 @@ enum TurntablePreset: String, CaseIterable, Identifiable {
 
 /// 转台配置（UserDefaults 持久化）。
 struct TurntableConfig: Equatable {
-    var preset: TurntablePreset = .uartFFE0
+    var preset: TurntablePreset = .controller360
     var customServiceUUID: String = ""
     var customWriteUUID: String = ""
     /// 启动/停止指令（十六进制文本）。默认 01/00，拿到实机后按品牌调。
@@ -287,11 +292,18 @@ final class TurntableService: NSObject {
         writeCharacteristic = exact ?? fallback
         if let chosen = writeCharacteristic {
             diagnostics.append("→ 写入目标: \(chosen.service?.uuid.uuidString ?? "?")/\(chosen.uuid.uuidString)\(exact == nil ? "（按第一个可写特征回退）" : "（精确匹配）")")
-        } else {
+            // 之前某个无可写特征的服务可能已把错误挂上，找到目标后清掉
+            if lastError == Self.noWritableMessage { lastError = nil }
+        } else if pendingCharacteristicDiscoveries == 0 {
+            // 只有所有服务的特征都侦察完仍没找到，才算真的没有（避免先到的服务误报）
             diagnostics.append("→ 未找到任何可写特征！")
-            lastError = "该设备没有可写特征，可能不是转台的控制模块"
+            lastError = Self.noWritableMessage
         }
     }
+
+    private static let noWritableMessage = "该设备没有可写特征，可能不是转台的控制模块"
+    /// 还没返回特征列表的服务数；归零后才能断言“没有可写特征”。
+    @ObservationIgnored private var pendingCharacteristicDiscoveries = 0
 }
 
 // MARK: - CoreBluetooth 代理（回调都在 main queue，assumeIsolated 转回 MainActor）
@@ -372,7 +384,9 @@ extension TurntableService: CBCentralManagerDelegate, CBPeripheralDelegate {
 
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         MainActor.assumeIsolated {
-            for service in peripheral.services ?? [] {
+            let services = peripheral.services ?? []
+            pendingCharacteristicDiscoveries = services.count
+            for service in services {
                 diagnostics.append("服务 \(service.uuid.uuidString)")
                 peripheral.discoverCharacteristics(nil, for: service)
             }
@@ -393,6 +407,7 @@ extension TurntableService: CBCentralManagerDelegate, CBPeripheralDelegate {
                 if characteristic.properties.contains(.read) { props.append("read") }
                 diagnostics.append("  特征 \(characteristic.uuid.uuidString) [\(props.joined(separator: ","))]")
             }
+            pendingCharacteristicDiscoveries = max(0, pendingCharacteristicDiscoveries - 1)
             pickWriteCharacteristic(for: peripheral)
         }
     }
