@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import CoreMotion
 import Observation
 
 /// 转台蓝牙指令的十六进制解析（"A5 01 5A" / "0x01,0x02" / "a5015a" 均可）。纯逻辑，单测覆盖。
@@ -85,7 +86,30 @@ struct TurntableConfig: Equatable {
     /// 360 Controller（MWE 主板）参数：速度档位 1–8（越大越快）、方向（顺/逆时针）。
     var speedLevel: Int = 5
     var clockwise: Bool = true
+    /// 倒数一开始就起转：录制开始时转台已匀速，成片第一帧就是稳定环绕（ChackTok 同款做法）。
+    var spinAtCountdown: Bool = true
+    /// 按录制时长自动选档，让每条视频约转 turnsPerShot 圈（需先做「自动校准转速」）。
+    var autoMatchTurns: Bool = false
+    var turnsPerShot: Int = 1
+    /// 校准表：档位 → 每转一圈的秒数（陀螺仪实测）。
+    var secondsPerTurn: [Int: Double] = [:]
     var rememberedDeviceID: String?
+
+    /// 给定录制时长应使用的档位：自动匹配时选「圈数最接近 turnsPerShot」的档，否则手动档。
+    func speedLevel(forRecordingSeconds seconds: Int) -> Int {
+        guard autoMatchTurns, !secondsPerTurn.isEmpty, seconds > 0 else { return speedLevel }
+        let wanted = Double(max(turnsPerShot, 1))
+        let best = secondsPerTurn.min { a, b in
+            abs(Double(seconds) / a.value - wanted) < abs(Double(seconds) / b.value - wanted)
+        }
+        return best?.key ?? speedLevel
+    }
+
+    /// 某档在给定时长下预计转几圈（未校准返回 nil）。
+    func predictedTurns(level: Int, recordingSeconds: Int) -> Double? {
+        guard let spt = secondsPerTurn[level], spt > 0 else { return nil }
+        return Double(recordingSeconds) / spt
+    }
 
     var serviceUUID: String {
         preset == .custom ? customServiceUUID : preset.defaultServiceUUID
@@ -104,6 +128,10 @@ struct TurntableConfig: Equatable {
         static let stop = "booth360.turntable.stopHex"
         static let speed = "booth360.turntable.speedLevel"
         static let clockwise = "booth360.turntable.clockwise"
+        static let spinAtCountdown = "booth360.turntable.spinAtCountdown"
+        static let autoMatchTurns = "booth360.turntable.autoMatchTurns"
+        static let turnsPerShot = "booth360.turntable.turnsPerShot"
+        static let secondsPerTurn = "booth360.turntable.secondsPerTurn"
         static let device = "booth360.turntable.deviceID"
     }
 
@@ -124,6 +152,19 @@ struct TurntableConfig: Equatable {
         if defaults.object(forKey: Key.clockwise) != nil {
             config.clockwise = defaults.bool(forKey: Key.clockwise)
         }
+        if defaults.object(forKey: Key.spinAtCountdown) != nil {
+            config.spinAtCountdown = defaults.bool(forKey: Key.spinAtCountdown)
+        }
+        config.autoMatchTurns = defaults.bool(forKey: Key.autoMatchTurns)
+        if defaults.object(forKey: Key.turnsPerShot) != nil {
+            config.turnsPerShot = min(max(defaults.integer(forKey: Key.turnsPerShot), 1), 3)
+        }
+        if let json = defaults.string(forKey: Key.secondsPerTurn),
+           let data = json.data(using: .utf8),
+           let table = try? JSONDecoder().decode([String: Double].self, from: data) {
+            config.secondsPerTurn = Dictionary(uniqueKeysWithValues:
+                table.compactMap { key, value in Int(key).map { ($0, value) } })
+        }
         config.rememberedDeviceID = defaults.string(forKey: Key.device)
         return config
     }
@@ -137,6 +178,13 @@ struct TurntableConfig: Equatable {
         defaults.set(stopHex, forKey: Key.stop)
         defaults.set(speedLevel, forKey: Key.speed)
         defaults.set(clockwise, forKey: Key.clockwise)
+        defaults.set(spinAtCountdown, forKey: Key.spinAtCountdown)
+        defaults.set(autoMatchTurns, forKey: Key.autoMatchTurns)
+        defaults.set(turnsPerShot, forKey: Key.turnsPerShot)
+        let table = Dictionary(uniqueKeysWithValues: secondsPerTurn.map { (String($0.key), $0.value) })
+        if let data = try? JSONEncoder().encode(table), let json = String(data: data, encoding: .utf8) {
+            defaults.set(json, forKey: Key.secondsPerTurn)
+        }
         defaults.set(rememberedDeviceID, forKey: Key.device)
     }
 
@@ -261,15 +309,88 @@ final class TurntableService: NSObject {
 
     // MARK: - 指令
 
-    /// 开始旋转。seconds 为本次录制预计时长（MWE 帧内的自动停止时长，兜底用；
-    /// 我们仍会在录完显式发停止）。
+    /// 开始旋转（测试/通用入口，用手动档位）。seconds 为帧内自动停止时长（兜底）。
     func sendStart(seconds: Int = 60) {
+        startSpin(level: config.speedLevel, seconds: seconds)
+    }
+
+    /// 拍摄起转：leadSeconds 是提前量（倒数秒数），recordingSeconds 是录制时长。
+    /// 档位按「自动匹配圈数」或手动档决定；帧内自停 = 提前量 + 录制 + 3 秒兜底，录完仍显式发停止。
+    func startSpin(recordingSeconds: Int, leadSeconds: Int) {
+        let level = config.speedLevel(forRecordingSeconds: recordingSeconds)
+        lastUsedSpeedLevel = level
+        startSpin(level: level, seconds: leadSeconds + recordingSeconds + 3)
+    }
+
+    /// 最近一次拍摄实际用的档位（自动匹配时便于在界面显示）。
+    private(set) var lastUsedSpeedLevel: Int?
+
+    private func startSpin(level: Int, seconds: Int) {
         if config.usesMWEFrame {
             let sw: UInt8 = config.clockwise ? 0x11 : 0x22
-            sendData(TurntableConfig.mweFrame(switchByte: sw, speedLevel: config.speedLevel,
-                                              seconds: seconds), label: "启动")
+            sendData(TurntableConfig.mweFrame(switchByte: sw, speedLevel: level, seconds: seconds),
+                     label: "启动(\(level)档)")
         } else {
             sendHex(config.startHex, label: "启动")
+        }
+    }
+
+    // MARK: - 转速自动校准（手机装在转台臂上，用陀螺仪测每档几秒一圈）
+
+    private(set) var isCalibrating = false
+    private(set) var calibrationStatus: String?
+
+    /// 逐档起转 → 等 4 秒加速 → 采 4 秒陀螺仪 → 停 2 秒；8 档约 90 秒。结果写入 config.secondsPerTurn。
+    func calibrateSpinRates() {
+        guard !isCalibrating else { return }
+        guard isConnected, config.usesMWEFrame else {
+            calibrationStatus = "请先连接 360 Controller 转台"
+            return
+        }
+        let motion = CMMotionManager()
+        guard motion.isDeviceMotionAvailable else {
+            calibrationStatus = "此设备没有陀螺仪，无法自动校准"
+            return
+        }
+        isCalibrating = true
+        calibrationStatus = "准备校准…请确认手机已固定在转台臂上"
+        Task { [weak self] in
+            guard let self else { return }
+            let sampler = SpinRateSampler()
+            motion.deviceMotionUpdateInterval = 1.0 / 50.0
+            motion.startDeviceMotionUpdates(to: OperationQueue()) { dm, _ in
+                guard let dm else { return }
+                sampler.add(deviceMotion: dm)
+            }
+            var table: [Int: Double] = [:]
+            var problems: [String] = []
+            for level in 1...8 {
+                self.calibrationStatus = "第 \(level)/8 档：起转加速中…"
+                self.startSpin(level: level, seconds: 12)
+                try? await Task.sleep(for: .seconds(4))
+                sampler.reset()
+                self.calibrationStatus = "第 \(level)/8 档：测速中…"
+                try? await Task.sleep(for: .seconds(4))
+                let degPerSec = sampler.medianDegreesPerSecond()
+                self.sendStop()
+                if degPerSec > 5 {
+                    table[level] = 360.0 / degPerSec
+                    self.calibrationStatus = String(format: "第 %d 档：%.1f 秒/圈", level, 360.0 / degPerSec)
+                } else {
+                    problems.append("\(level)")
+                    self.calibrationStatus = "第 \(level) 档未测到旋转"
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
+            motion.stopDeviceMotionUpdates()
+            if !table.isEmpty {
+                self.config.secondsPerTurn = table
+                self.config.save()
+            }
+            self.isCalibrating = false
+            self.calibrationStatus = problems.isEmpty
+                ? "校准完成：8 档转速已记录"
+                : "校准完成（第 \(problems.joined(separator: "、")) 档未测到旋转——手机是否固定在转台臂上？）"
         }
     }
 
@@ -351,6 +472,31 @@ final class TurntableService: NSObject {
     private static let noWritableMessage = "该设备没有可写特征，可能不是转台的控制模块"
     /// 还没返回特征列表的服务数；归零后才能断言“没有可写特征”。
     @ObservationIgnored private var pendingCharacteristicDiscoveries = 0
+}
+
+/// 陀螺仪采样：取绕重力轴（竖直轴）的角速度——不管手机怎么装在臂上都成立。线程安全。
+final class SpinRateSampler: @unchecked Sendable {
+    private let lock = NSLock()
+    private var samples: [Double] = []
+
+    func add(deviceMotion dm: CMDeviceMotion) {
+        let g = dm.gravity, r = dm.rotationRate
+        let norm = (g.x * g.x + g.y * g.y + g.z * g.z).squareRoot()
+        guard norm > 0 else { return }
+        let radPerSec = (r.x * g.x + r.y * g.y + r.z * g.z) / norm
+        lock.lock(); samples.append(abs(radPerSec) * 180 / .pi); lock.unlock()
+    }
+
+    func reset() {
+        lock.lock(); samples.removeAll(); lock.unlock()
+    }
+
+    /// 中位数（度/秒），抗加速段与抖动。
+    func medianDegreesPerSecond() -> Double {
+        lock.lock(); let s = samples.sorted(); lock.unlock()
+        guard !s.isEmpty else { return 0 }
+        return s[s.count / 2]
+    }
 }
 
 // MARK: - CoreBluetooth 代理（回调都在 main queue，assumeIsolated 转回 MainActor）

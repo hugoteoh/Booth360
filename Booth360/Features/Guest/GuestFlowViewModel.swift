@@ -143,22 +143,29 @@ final class GuestFlowViewModel {
     private func runFlow() async {
         autoReturnTask?.cancel()
 
-        // 1. 倒数
+        // 1. 倒数（默认「倒数即转」：倒数期间转台加速到匀速）
         let countdown = event.countdownSeconds
+        var spinning = false
         if countdown > 0 {
+            if event.turntableSpinEnabled, turntable?.config.spinAtCountdown == true {
+                turntable?.startSpin(recordingSeconds: event.recordingSeconds, leadSeconds: countdown)
+                spinning = true
+            }
             for remaining in stride(from: countdown, through: 1, by: -1) {
                 phase = .countingDown(remaining)
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled {
+                    if spinning { turntable?.sendStop() }
                     phase = .welcome
                     return
                 }
             }
         }
 
-        // 2. 录制（自动停止由引擎 maxRecordedDuration 保证）；转台随录制起转
-        if event.turntableSpinEnabled {
-            turntable?.sendStart(seconds: event.recordingSeconds + 3)
+        // 2. 录制（自动停止由引擎 maxRecordedDuration 保证）；未在倒数起转的此刻起转
+        if event.turntableSpinEnabled, !spinning {
+            turntable?.startSpin(recordingSeconds: event.recordingSeconds, leadSeconds: 0)
+            spinning = true
         }
         let sourceURL = storage.newSourceClipURL()
         let totalSeconds = event.recordingSeconds
@@ -177,7 +184,7 @@ final class GuestFlowViewModel {
         do {
             let info = try await cameraEngine.startRecording(to: sourceURL, maxSeconds: totalSeconds)
             tickTask.cancel()
-            if event.turntableSpinEnabled { turntable?.sendStop() }
+            if spinning { turntable?.sendStop(); spinning = false }
 
             // 3. 源片入库（先保住素材，处理失败也不丢）
             let clip = SourceClip(
@@ -238,7 +245,7 @@ final class GuestFlowViewModel {
             startAutoReturnCountdown()
         } catch {
             tickTask.cancel()
-            if event.turntableSpinEnabled { turntable?.sendStop() }
+            if spinning { turntable?.sendStop() }
             if !clipSaved {
                 // 录制阶段就失败：清掉半成品文件
                 storage.deleteFileIfExists(at: sourceURL)

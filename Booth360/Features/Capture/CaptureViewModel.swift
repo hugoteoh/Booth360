@@ -219,6 +219,11 @@ final class CaptureViewModel {
         errorMessage = nil
 
         let countdown = settings.countdownSeconds
+        // 转台：默认「倒数即转」——倒数期间加速到匀速，录制第一帧就是稳定环绕
+        if countdown > 0, turntableSpinEnabled, turntable?.config.spinAtCountdown == true {
+            turntable?.startSpin(recordingSeconds: effectiveRecordingSeconds, leadSeconds: countdown)
+            turntableSpinning = true
+        }
         countdownTask = Task { [weak self] in
             guard let self else { return }
             if countdown > 0 {
@@ -236,12 +241,26 @@ final class CaptureViewModel {
         }
     }
 
+    /// 当前活动是否开了「拍摄时蓝牙控制转台旋转」。
+    private var turntableSpinEnabled: Bool {
+        modelContext.flatMap { EventManager.activeEvent(in: $0) }?.turntableSpinEnabled == true
+    }
+    /// 本次拍摄是否已让转台转起来（倒数或录制阶段），用于保证有起必有停。
+    @ObservationIgnored private var turntableSpinning = false
+
+    private func stopTurntableIfSpinning() {
+        guard turntableSpinning else { return }
+        turntableSpinning = false
+        turntable?.sendStop()
+    }
+
     /// 倒数阶段可取消；录制阶段调用则提前停止（片段仍会保存）。
     func cancelOrStopTapped() {
         switch phase {
         case .countingDown:
             countdownTask?.cancel()
             countdownTask = nil
+            stopTurntableIfSpinning()
             phase = .idle
         case .recording:
             engine.stopRecording()
@@ -253,10 +272,12 @@ final class CaptureViewModel {
     private func beginRecording() async {
         let url = storage.newSourceClipURL()
         recordingElapsedSeconds = 0
-        // 当前活动开了转台旋转 → 录制起转、录完停
-        let spinEnabled = modelContext
-            .flatMap { EventManager.activeEvent(in: $0) }?.turntableSpinEnabled == true
-        if spinEnabled { turntable?.sendStart(seconds: effectiveRecordingSeconds + 3) }
+        // 没在倒数阶段起转（不倒数 / 关了倒数即转）→ 录制开始时起转
+        let spinEnabled = turntableSpinEnabled
+        if spinEnabled, !turntableSpinning {
+            turntable?.startSpin(recordingSeconds: effectiveRecordingSeconds, leadSeconds: 0)
+            turntableSpinning = true
+        }
         phase = .recording
         startElapsedTicker()
 
@@ -265,7 +286,7 @@ final class CaptureViewModel {
 
         do {
             let info = try await engine.startRecording(to: url, maxSeconds: effectiveRecordingSeconds)
-            if spinEnabled { turntable?.sendStop() }
+            stopTurntableIfSpinning()
             elapsedTask?.cancel()
             phase = .saving
             let clip = saveClipRecord(info)
@@ -275,7 +296,7 @@ final class CaptureViewModel {
                 await autoProcessWithActiveEvent(clip: clip, sourceURL: info.url)
             }
         } catch {
-            if spinEnabled { turntable?.sendStop() }
+            stopTurntableIfSpinning()
             elapsedTask?.cancel()
             phase = .idle
             storage.deleteFileIfExists(at: url)
