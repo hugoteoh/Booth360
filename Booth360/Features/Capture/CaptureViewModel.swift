@@ -327,7 +327,8 @@ final class CaptureViewModel {
             width: info.width,
             height: info.height,
             frameRate: info.frameRate,
-            lensRawValue: info.lens.rawValue
+            lensRawValue: info.lens.rawValue,
+            eventID: EventManager.activeEventID   // 源片段也归属当前活动
         )
         modelContext.insert(clip)
         do {

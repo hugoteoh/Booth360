@@ -2,16 +2,13 @@ import SwiftUI
 
 /// 管理员设置：嘉宾模式 PIN、上传后端（Mock / 腾讯云 COS）、系统状态。
 struct AdminSettingsView: View {
+    let storage: FileStorageService
+    let cameraEngine: CameraEngine
+    let onLaunchGuestMode: (EventTemplate) -> Void
+
     @Environment(SystemStatusMonitor.self) private var monitor
     @Environment(LANControlServer.self) private var lanServer
     @Environment(UploadQueue.self) private var uploadQueue
-    @Environment(TurntableService.self) private var turntable
-
-    private var turntableStateBrief: String {
-        if case .connected(let name) = turntable.state { return name }
-        return "未连接"
-    }
-
     @State private var pin = PINPadView.storedPIN
     @State private var uploadMode = UploadMode.current
     @State private var cosConfig = COSConfig.load()
@@ -100,17 +97,15 @@ struct AdminSettingsView: View {
 
             Section {
                 NavigationLink {
-                    TurntableSettingsView()
+                    EventListView(storage: storage, cameraEngine: cameraEngine,
+                                  onLaunchGuestMode: onLaunchGuestMode)
                 } label: {
-                    LabeledContent("转台设备（蓝牙）") {
-                        Text(turntableStateBrief)
-                            .foregroundStyle(.secondary)
-                    }
+                    Label("活动管理", systemImage: "party.popper")
                 }
             } header: {
-                Text("360 转台")
+                Text("活动")
             } footer: {
-                Text("连接转台后，在活动设置里打开「拍摄时蓝牙控制转台旋转」——开始拍摄时转台自动转、录完自动停（主拍摄页与嘉宾模式都生效）。")
+                Text("活动模板保存品牌素材、拍摄模式与效果参数；成品和源片段按当前活动分开管理。转台蓝牙连接入口在拍摄页右上角（绿=已连接，红=未连接）。")
             }
 
             Section {

@@ -4,9 +4,23 @@ import SwiftData
 /// 成品列表：缩略图 + 参数摘要 + 收藏/上传状态，点击进详情。
 struct RenderListView: View {
     let storage: FileStorageService
+    /// 当前活动名（标题用）；nil = 未选活动，显示全部。
+    let eventName: String?
 
-    @Query(sort: \RenderedVideo.createdAt, order: .reverse) private var renders: [RenderedVideo]
+    @Query private var renders: [RenderedVideo]
     @Environment(\.modelContext) private var modelContext
+
+    /// 成品按活动分开：只列当前活动的（未选活动时列全部）。
+    init(storage: FileStorageService, eventID: UUID?, eventName: String?) {
+        self.storage = storage
+        self.eventName = eventName
+        let sort = [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)]
+        if let eventID {
+            _renders = Query(filter: #Predicate<RenderedVideo> { $0.eventID == eventID }, sort: sort)
+        } else {
+            _renders = Query(sort: sort)
+        }
+    }
     @Environment(UploadQueue.self) private var uploadQueue
     @State private var batchMessage: String?
 
@@ -27,7 +41,7 @@ struct RenderListView: View {
                 }
             }
         }
-        .navigationTitle("成品（\(renders.count)）")
+        .navigationTitle(eventName.map { "\($0) · 成品（\(renders.count)）" } ?? "成品（\(renders.count)）")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if !renders.isEmpty {

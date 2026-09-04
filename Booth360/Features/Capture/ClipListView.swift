@@ -6,8 +6,21 @@ import AVKit
 /// 支持播放、删除；文件缺失时标灰提示。
 struct ClipListView: View {
     let storage: FileStorageService
+    let eventName: String?
 
-    @Query(sort: \SourceClip.createdAt, order: .reverse) private var clips: [SourceClip]
+    @Query private var clips: [SourceClip]
+
+    /// 源片段按活动分开：只列当前活动的（未选活动时列全部）。
+    init(storage: FileStorageService, eventID: UUID?, eventName: String?) {
+        self.storage = storage
+        self.eventName = eventName
+        let sort = [SortDescriptor(\SourceClip.createdAt, order: .reverse)]
+        if let eventID {
+            _clips = Query(filter: #Predicate<SourceClip> { $0.eventID == eventID }, sort: sort)
+        } else {
+            _clips = Query(sort: sort)
+        }
+    }
     @Environment(\.modelContext) private var modelContext
     @State private var playingURL: IdentifiableURL?
     /// 列表编辑模式（显式删除入口；左滑删除仍然可用）。
@@ -31,7 +44,7 @@ struct ClipListView: View {
                 .environment(\.editMode, $editMode)
             }
         }
-        .navigationTitle("源片段（\(clips.count)）")
+        .navigationTitle(eventName.map { "\($0) · 源片段（\(clips.count)）" } ?? "源片段（\(clips.count)）")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

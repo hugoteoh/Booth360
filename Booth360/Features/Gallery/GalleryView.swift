@@ -2,10 +2,13 @@ import SwiftUI
 import AVFoundation
 import UIKit
 
-/// Gallery：成品 / 源片段 两个分栏。
+/// Gallery：成品 / 源片段 两个分栏，内容只属于「当前活动」（各活动分开，互不混）。
 struct GalleryView: View {
     let storage: FileStorageService
+    @Environment(\.modelContext) private var modelContext
     @State private var selectedTab = 0
+
+    private var activeEvent: EventTemplate? { EventManager.activeEvent(in: modelContext) }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -16,10 +19,16 @@ struct GalleryView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal)
 
+            if activeEvent == nil {
+                Text("未选择活动，显示全部")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if selectedTab == 0 {
-                RenderListView(storage: storage)
+                RenderListView(storage: storage, eventID: activeEvent?.id, eventName: activeEvent?.name)
             } else {
-                ClipListView(storage: storage)
+                ClipListView(storage: storage, eventID: activeEvent?.id, eventName: activeEvent?.name)
             }
         }
     }

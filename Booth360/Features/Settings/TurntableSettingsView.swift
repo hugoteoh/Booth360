@@ -51,7 +51,6 @@ struct TurntableSettingsView: View {
                 Section {
                     Stepper("旋转速度：\(config.speedLevel) 档（1 慢 – 8 快）",
                             value: $config.speedLevel, in: 1...8)
-                        .disabled(config.autoMatchTurns)
                     Picker("旋转方向", selection: $config.clockwise) {
                         Text("顺时针").tag(true)
                         Text("逆时针").tag(false)
@@ -62,43 +61,6 @@ struct TurntableSettingsView: View {
                     Text("旋转参数（360 Controller）")
                 } footer: {
                     Text("倒数时提前起转：按下快门倒数一开始转台就起转，倒数结束时已匀速，成片第一帧就是稳定环绕（推荐开启）。")
-                }
-
-                Section {
-                    Toggle("按录制时长自动匹配圈数", isOn: $config.autoMatchTurns)
-                        .disabled(config.secondsPerTurn.isEmpty)
-                    if config.autoMatchTurns {
-                        Stepper("每条视频转 \(config.turnsPerShot) 圈", value: $config.turnsPerShot, in: 1...3)
-                    }
-                    Button {
-                        turntable.calibrateSpinRates()
-                    } label: {
-                        Label(turntable.isCalibrating ? "校准中…" : "自动校准转速（约 90 秒）",
-                              systemImage: "gyroscope")
-                    }
-                    .disabled(!turntable.isConnected || turntable.isCalibrating)
-                    if let status = turntable.calibrationStatus {
-                        Text(status).font(.caption).foregroundStyle(.secondary)
-                    }
-                    if !config.secondsPerTurn.isEmpty {
-                        ForEach(config.secondsPerTurn.keys.sorted(), id: \.self) { level in
-                            LabeledContent("第 \(level) 档",
-                                           value: String(format: "%.1f 秒/圈", config.secondsPerTurn[level] ?? 0))
-                                .font(.caption)
-                        }
-                        ForEach([5, 8, 10, 15], id: \.self) { secs in
-                            let level = config.speedLevel(forRecordingSeconds: secs)
-                            let turns = config.predictedTurns(level: level, recordingSeconds: secs) ?? 0
-                            LabeledContent("录 \(secs) 秒 → 第 \(level) 档",
-                                           value: String(format: "≈ %.2f 圈", turns))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } header: {
-                    Text("一圈自动匹配")
-                } footer: {
-                    Text("校准时把手机固定在转台臂上、清空转台，点按钮后 App 逐档起转并用陀螺仪测出每档几秒一圈。之后开启自动匹配，拍摄时会按该模式的录制时长自动选最接近整圈的档位。")
                 }
             }
 
@@ -156,10 +118,6 @@ struct TurntableSettingsView: View {
             newValue.save()
             turntable.config = newValue
             turntable.reresolveCharacteristic()
-        }
-        // 校准结束后把服务里写入的校准表同步回本页
-        .onChange(of: turntable.isCalibrating) { _, calibrating in
-            if !calibrating { config = turntable.config }
         }
     }
 }

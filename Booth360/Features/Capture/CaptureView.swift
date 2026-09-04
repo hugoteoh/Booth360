@@ -12,7 +12,6 @@ struct CaptureView: View {
     @Environment(UploadQueue.self) private var uploadQueue
     @Environment(RemoteControlHub.self) private var hub
     @Environment(TurntableService.self) private var turntable
-    @State private var showManualPanel = false
     /// 拍完点「处理/预览」直接跳编辑页。
     @State private var editingClip: SourceClip?
 
@@ -103,9 +102,6 @@ struct CaptureView: View {
                 viewModel.startTapped()
             }
         }
-        .sheet(isPresented: $showManualPanel) {
-            ManualControlsPanel(viewModel: viewModel)
-        }
         .navigationDestination(item: $editingClip) { clip in
             EditView(clip: clip, storage: viewModel.storage)
         }
@@ -132,15 +128,15 @@ struct CaptureView: View {
                     .background(.black.opacity(0.45), in: Circle())
             }
 
+            // 转台蓝牙入口放主页：进场先连转台，图标颜色即连接状态（绿=已连接，红=未连接）
             NavigationLink {
-                EventListView(
-                    storage: viewModel.storage,
-                    cameraEngine: engine,
-                    onLaunchGuestMode: onLaunchGuestMode
-                )
+                TurntableSettingsView()
             } label: {
-                Image(systemName: "party.popper")
+                Image(systemName: turntable.isConnected
+                      ? "antenna.radiowaves.left.and.right"
+                      : "antenna.radiowaves.left.and.right.slash")
                     .font(.title3)
+                    .foregroundStyle(turntable.isConnected ? Color.green : Color.red)
                     .frame(width: 44, height: 44)
                     .background(.black.opacity(0.45), in: Circle())
             }
@@ -173,7 +169,8 @@ struct CaptureView: View {
             Spacer()
 
             NavigationLink {
-                AdminSettingsView()
+                AdminSettingsView(storage: viewModel.storage, cameraEngine: engine,
+                                  onLaunchGuestMode: onLaunchGuestMode)
             } label: {
                 Image(systemName: "gearshape")
                     .font(.title3)
@@ -359,12 +356,6 @@ struct CaptureView: View {
                 } label: {
                     pillLabel(icon: "video.badge.checkmark", text: "录 \(viewModel.settings.recordingSeconds)s")
                 }
-            }
-
-            Button {
-                showManualPanel = true
-            } label: {
-                pillLabel(icon: "slider.horizontal.3", text: "手动")
             }
         }
         .foregroundStyle(.white)
