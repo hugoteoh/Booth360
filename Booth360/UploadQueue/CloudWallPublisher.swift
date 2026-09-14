@@ -107,16 +107,25 @@ enum CloudWallPublisher {
             // 4. 视频总览：gallery.json（当前活动全部成品，链接 7 天签名本地生成）+ 页面
             let galleryFormatter = DateFormatter()
             galleryFormatter.dateFormat = "MM-dd HH:mm"
-            let galleryJSON: [[String: Any]] = galleryItems.compactMap { item in
-                let key = "booth360/\(item.id.uuidString.lowercased())/\(item.fileName)"
+            var galleryJSON: [[String: Any]] = []
+            for item in galleryItems {
+                let base = "booth360/\(item.id.uuidString.lowercased())"
                 guard let url = COSSigner.signedURL(
-                    config: config, objectKey: key, method: "get",
-                    expiresSeconds: TencentCOSBackend.downloadExpirySeconds) else { return nil }
-                return [
+                    config: config, objectKey: "\(base)/\(item.fileName)", method: "get",
+                    expiresSeconds: TencentCOSBackend.downloadExpirySeconds) else { continue }
+                // 小程序清单（v.json）随发布续期——覆盖当前活动全部成品（含未上大屏的）
+                try await putPublicObject(
+                    data: TencentCOSBackend.miniProgramManifest(
+                        videoURL: url.absoluteString, eventName: eventName),
+                    objectKey: "\(base)/v.json",
+                    contentType: "application/json",
+                    config: config
+                )
+                galleryJSON.append([
                     "id": item.id.uuidString,
                     "time": galleryFormatter.string(from: item.createdAt),
                     "url": url.absoluteString,
-                ]
+                ])
             }
             let galleryManifest: [String: Any] = [
                 "updatedAt": Int(Date().timeIntervalSince1970),

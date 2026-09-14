@@ -139,6 +139,18 @@ struct TencentCOSBackend: UploadBackend {
     /// 下载链接有效期：7 天（与 AI PhotoBooth Pro 一致）。
     static let downloadExpirySeconds: TimeInterval = 7 * 24 * 3600
 
+    /// 小程序清单（booth360/<id>/v.json，公开可读）：微信「扫普通链接二维码」进小程序后
+    /// 据此拿到最新签名视频链接；每次云端大屏发布对当前活动全部成品续期。
+    static func miniProgramManifest(videoURL: String, eventName: String) -> Data {
+        let manifest: [String: Any] = [
+            "schema": 1,
+            "video": videoURL,
+            "event": eventName,
+            "expiresAt": Int(Date().timeIntervalSince1970 + downloadExpirySeconds),
+        ]
+        return (try? JSONSerialization.data(withJSONObject: manifest)) ?? Data("{}".utf8)
+    }
+
     func upload(
         fileURL: URL,
         objectKey: String,
@@ -197,6 +209,13 @@ struct TencentCOSBackend: UploadBackend {
                 data: Data(landingHTML.utf8),
                 objectKey: "\(baseKey)/index.html",
                 contentType: "text/html; charset=utf-8",
+                config: config
+            )
+            // 小程序清单：即使云端大屏关闭也保证新成品能被小程序打开（活动名等发布时补）
+            try await CloudWallPublisher.putPublicObject(
+                data: Self.miniProgramManifest(videoURL: videoGET.absoluteString, eventName: ""),
+                objectKey: "\(baseKey)/v.json",
+                contentType: "application/json",
                 config: config
             )
             if config.hasCustomDomain,

@@ -252,7 +252,7 @@ final class UploadQueue {
         let config = COSConfig.load()
         guard config.isComplete else { return }
         let baseKey = "booth360/\(id.uuidString.lowercased())"
-        let keys = ["\(baseKey)/\(fileName)", "\(baseKey)/index.html", "\(baseKey)/qr.png"]
+        let keys = ["\(baseKey)/\(fileName)", "\(baseKey)/index.html", "\(baseKey)/qr.png", "\(baseKey)/v.json"]
         Task.detached {
             for key in keys {
                 guard let url = COSSigner.signedURL(
