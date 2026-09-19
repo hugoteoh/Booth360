@@ -46,7 +46,10 @@ enum CloudWallPublisher {
             // 每次发布对全部条目重新签名 + 重生成二维码：链接永远新鲜（各 7 天有效期从现在起算）
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
+            // 顺序要点：清单/页面先行（删了的立即消失、新拍的立即上墙），
+            // 每条的 qr/落地页/v.json 刷新放最后 —— 发布中途被 iOS 挂起也不会让大屏挂死条目。
             var jsonItems: [[String: Any]] = []
+            var wallAssets: [(baseKey: String, pageURL: String, videoURL: URL)] = []
             for item in items {
                 let baseKey = "booth360/\(item.id.uuidString.lowercased())"
                 // 落地页与二维码用永久公开地址（自定义域名）；页内视频链接每次发布续期 7 天。
@@ -55,27 +58,8 @@ enum CloudWallPublisher {
                 let qrURL = "https://\(config.publicHost)/\(baseKey)/qr.png"
                 guard let videoURL = COSSigner.signedURL(
                         config: config, objectKey: "\(baseKey)/\(item.fileName)",
-                        method: "get", expiresSeconds: TencentCOSBackend.downloadExpirySeconds),
-                      let qrImage = QRCodeGenerator.image(
-                        for: config.hasCustomDomain ? pageURL : videoURL.absoluteString,
-                        sidePixels: 480),
-                      let qrPNG = qrImage.pngData() else { continue }
-                try await putPublicObject(
-                    data: qrPNG,
-                    objectKey: "\(baseKey)/qr.png",
-                    contentType: "image/png",
-                    config: config
-                )
-                let landingHTML = DownloadPageHTML.html(
-                    videoURL: videoURL.absoluteString,
-                    title: "你的 360 视频"
-                )
-                try await putPublicObject(
-                    data: Data(landingHTML.utf8),
-                    objectKey: "\(baseKey)/index.html",
-                    contentType: "text/html; charset=utf-8",
-                    config: config
-                )
+                        method: "get", expiresSeconds: TencentCOSBackend.downloadExpirySeconds) else { continue }
+                wallAssets.append((baseKey, pageURL, videoURL))
                 jsonItems.append([
                     "id": item.id.uuidString,
                     "time": formatter.string(from: item.createdAt),
@@ -108,19 +92,13 @@ enum CloudWallPublisher {
             let galleryFormatter = DateFormatter()
             galleryFormatter.dateFormat = "MM-dd HH:mm"
             var galleryJSON: [[String: Any]] = []
+            var galleryAssets: [(base: String, url: URL)] = []
             for item in galleryItems {
                 let base = "booth360/\(item.id.uuidString.lowercased())"
                 guard let url = COSSigner.signedURL(
                     config: config, objectKey: "\(base)/\(item.fileName)", method: "get",
                     expiresSeconds: TencentCOSBackend.downloadExpirySeconds) else { continue }
-                // 小程序清单（v.json）随发布续期——覆盖当前活动全部成品（含未上大屏的）
-                try await putPublicObject(
-                    data: TencentCOSBackend.miniProgramManifest(
-                        videoURL: url.absoluteString, eventName: eventName),
-                    objectKey: "\(base)/v.json",
-                    contentType: "application/json",
-                    config: config
-                )
+                galleryAssets.append((base, url))
                 galleryJSON.append([
                     "id": item.id.uuidString,
                     "time": galleryFormatter.string(from: item.createdAt),
@@ -164,7 +142,51 @@ enum CloudWallPublisher {
                 contentType: "text/html; charset=utf-8",
                 config: config
             )
-            AppLogger.storage.info("云端大屏已发布 \(jsonItems.count) 条（总览 \(galleryJSON.count) 条，活动目录 \(folder, privacy: .public)）")
+            AppLogger.storage.info("云端大屏已发布 \(jsonItems.count) 条（总览 \(galleryJSON.count) 条，活动目录 \(folder, privacy: .public)），开始刷新单条资产")
+
+            // 6. 逐条资产刷新（qr / 落地页 / 小程序 v.json）：全部是重签续期或幂等重写，
+            //    中断只影响"续期时点"，不影响节目单正确性；单条失败跳过不拖垮整体。
+            for asset in wallAssets {
+                do {
+                    if let qrImage = QRCodeGenerator.image(
+                        for: config.hasCustomDomain ? asset.pageURL : asset.videoURL.absoluteString,
+                        sidePixels: 480),
+                       let qrPNG = qrImage.pngData() {
+                        try await putPublicObject(
+                            data: qrPNG,
+                            objectKey: "\(asset.baseKey)/qr.png",
+                            contentType: "image/png",
+                            config: config
+                        )
+                    }
+                    let landingHTML = DownloadPageHTML.html(
+                        videoURL: asset.videoURL.absoluteString,
+                        title: "你的 360 视频"
+                    )
+                    try await putPublicObject(
+                        data: Data(landingHTML.utf8),
+                        objectKey: "\(asset.baseKey)/index.html",
+                        contentType: "text/html; charset=utf-8",
+                        config: config
+                    )
+                } catch {
+                    AppLogger.storage.error("单条资产刷新失败(跳过): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            for asset in galleryAssets {
+                do {
+                    // 小程序清单（v.json）随发布续期——覆盖当前活动全部成品（含未上大屏的）
+                    try await putPublicObject(
+                        data: TencentCOSBackend.miniProgramManifest(
+                            videoURL: asset.url.absoluteString, eventName: eventName),
+                        objectKey: "\(asset.base)/v.json",
+                        contentType: "application/json",
+                        config: config
+                    )
+                } catch {
+                    AppLogger.storage.error("v.json 刷新失败(跳过): \(error.localizedDescription, privacy: .public)")
+                }
+            }
         } catch {
             // 发布失败不影响主流程，下次上传成功后会再试
             AppLogger.storage.error("云端大屏发布失败: \(error.localizedDescription, privacy: .public)")
