@@ -192,6 +192,31 @@ enum WallPageTemplate {
         let smooth = false;
         try { smooth = localStorage.getItem("booth360.wall.smooth") === "1"; } catch (e) {}
 
+        // 静态小卡取帧位置（0~1）：360 转臂从停靠位起匀速转，录制第一帧常是背面；
+        // 默认取 50%（转到一半 ≈ 正面），各大屏可在设置面板微调（存 localStorage）。
+        let thumbFrac = 0.5;
+        try {
+          const tf = parseFloat(localStorage.getItem("booth360.wall.thumb"));
+          if (isFinite(tf) && tf >= 0 && tf <= 1) thumbFrac = tf;
+        } catch (e) {}
+        function seekThumb(v) {
+          const apply = () => {
+            if (!v.isConnected || v.autoplay) return; // 播放中的卡不动
+            if (!isFinite(v.duration) || v.duration <= 0) return;
+            const tt = Math.min(v.duration - 0.05, Math.max(0.05, v.duration * thumbFrac));
+            try { v.currentTime = tt; } catch (e) {}
+          };
+          if (v.readyState >= 1) apply();
+          else v.addEventListener("loadedmetadata", apply, { once: true });
+        }
+        function refreshThumbs() {
+          document.querySelectorAll(".feat-strip video").forEach(seekThumb);
+          gridKnown.forEach((entry) => {
+            const v = entry.el.querySelector("video");
+            if (v && !entry.playing) seekThumb(v);
+          });
+        }
+
         let items = [];
         let sig = "";           // id+qr 指纹：没变就不动 DOM（视频不重启）
         let cineIdx = 0;
@@ -319,6 +344,26 @@ enum WallPageTemplate {
             if (mode === "grid") gridSync();
           };
           box.appendChild(b);
+
+          // 静态卡画面位置滑杆：开头是背面就往中间拉（转台起点在背后时 50% ≈ 正面）
+          const row = document.createElement("div");
+          row.className = "popt";
+          row.style.cursor = "default";
+          row.innerHTML = `<span class="ic">🧍</span><span style="flex:1">静态卡画面位置` +
+            `<small>下排/静态小卡显示视频第几处的画面 —— 第一帧是背面就往中间拉（一般 50% 正好正面）</small>` +
+            `<input id="thumbRange" type="range" min="0" max="100" step="1" style="width:100%;margin-top:8px">` +
+            `</span><b id="thumbPct" style="flex:none;min-width:3.4em;text-align:right"></b>`;
+          box.appendChild(row);
+          const rng = row.querySelector("#thumbRange");
+          const pctEl = row.querySelector("#thumbPct");
+          rng.value = Math.round(thumbFrac * 100);
+          pctEl.textContent = Math.round(thumbFrac * 100) + "%";
+          rng.oninput = () => { pctEl.textContent = rng.value + "%"; };
+          rng.onchange = () => {
+            thumbFrac = rng.value / 100;
+            try { localStorage.setItem("booth360.wall.thumb", String(thumbFrac)); } catch (e) {}
+            refreshThumbs();
+          };
         }
 
         document.getElementById("gear").onclick = () => {
@@ -345,7 +390,7 @@ enum WallPageTemplate {
           // play=false：只显示首帧不播放（#t=0.1 让浏览器 seek 到首帧），下排小卡用
           const video = play
             ? `<video src="${item.videoURL}" autoplay muted loop playsinline preload="auto"></video>`
-            : `<video src="${item.videoURL}#t=0.1" muted playsinline preload="metadata"></video>`;
+            : `<video src="${item.videoURL}" muted playsinline preload="metadata"></video>`;
           return `<div class="wcell" style="--i:${i % 12}">${video}
             <div class="qrbox">${qrHTML(item)}</div></div>`;
         }
@@ -375,7 +420,7 @@ enum WallPageTemplate {
             if (entry.playing !== shouldPlay || !v.isConnected) return;
             v.autoplay = shouldPlay; v.loop = shouldPlay;
             v.preload = shouldPlay ? "auto" : "metadata";
-            const src = shouldPlay ? item.videoURL : item.videoURL + "#t=0.1";
+            const src = item.videoURL; // 播放/静态共用 src，切换不触发整条重载
             if (v.getAttribute("src") !== src) v.src = src;
             if (shouldPlay) {
               // 动态插入的元素一次 play() 可能太早被吞：数据到位后再补一次
@@ -388,6 +433,7 @@ enum WallPageTemplate {
               tryPlay();
             } else {
               v.pause();
+              seekThumb(v);
             }
           }, delayMs || 0);
         }
@@ -470,6 +516,8 @@ enum WallPageTemplate {
               trim();
               setTimeout(trim, 600);
               setTimeout(trim, 2000);
+              // 静态小卡取中段帧（通常正面），位置可在设置面板调
+              strip.querySelectorAll("video").forEach(seekThumb);
             }
 
           } else {
