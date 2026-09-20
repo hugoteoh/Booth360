@@ -209,6 +209,11 @@ enum WallPageTemplate {
           if (v.readyState >= 1) apply();
           else v.addEventListener("loadedmetadata", apply, { once: true });
         }
+        // 每次发布所有链接的签名参数都会轮换，但文件本身没变 —— 换源与否只看路径，
+        // 已加载的视频绝不因签名轮换而重载（旧签名在其 7 天有效期内依然可用）。
+        function samePath(a, b) {
+          return String(a || "").split(/[?#]/)[0] === String(b || "").split(/[?#]/)[0];
+        }
         function refreshThumbs() {
           document.querySelectorAll(".feat-strip video").forEach(seekThumb);
           gridKnown.forEach((entry) => {
@@ -421,7 +426,7 @@ enum WallPageTemplate {
             v.autoplay = shouldPlay; v.loop = shouldPlay;
             v.preload = shouldPlay ? "auto" : "metadata";
             const src = item.videoURL; // 播放/静态共用 src，切换不触发整条重载
-            if (v.getAttribute("src") !== src) v.src = src;
+            if (!samePath(v.getAttribute("src"), src)) v.src = src;
             if (shouldPlay) {
               // 动态插入的元素一次 play() 可能太早被吞：数据到位后再补一次
               const tryPlay = () => {
