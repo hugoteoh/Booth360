@@ -68,6 +68,8 @@ struct ExternalWallView: View {
             .frame(height: layout.scaled(100))
 
             ExternalWallPlayerLayerView(player: controller.player, isReady: $isVideoReady)
+                // Do not retain the previous video's last frame next to a new QR.
+                .id(item.id)
                 .background(.black)
                 .overlay {
                     if !isVideoReady {

@@ -1,4 +1,5 @@
 import AVFoundation
+import SwiftData
 import XCTest
 @testable import Booth360
 
@@ -56,5 +57,29 @@ final class ExternalWallConnectionTests: XCTestCase {
         XCTAssertFalse(relaunched.isEnabled)
         controller.isEnabled = true
         XCTAssertTrue(controller.isEnabled)
+    }
+
+    func testFailedLastVideoReleasesPlayerInsteadOfLeavingTVLoadingForever() async throws {
+        let schema = Schema([EventTemplate.self, SourceClip.self, RenderedVideo.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        controller.configure(storage: FileStorageService(), modelContext: container.mainContext,
+                             isCaptureBusy: { false })
+        XCTAssertTrue(controller.connect(sessionID: "tv"))
+        defer { controller.disconnect(sessionID: "tv") }
+
+        // An empty composition cannot play; no camera, decoder or real media is
+        // required to exercise the failed-item notification and resource cleanup.
+        let failedItem = AVPlayerItem(asset: AVMutableComposition())
+        controller.player.replaceCurrentItem(with: failedItem)
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: failedItem)
+        for _ in 0..<100 {
+            if controller.player.currentItem == nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNil(controller.player.currentItem)
+        XCTAssertNil(controller.currentItem)
+        XCTAssertNil(controller.qrImage)
+        XCTAssertEqual(controller.player.rate, 0)
     }
 }

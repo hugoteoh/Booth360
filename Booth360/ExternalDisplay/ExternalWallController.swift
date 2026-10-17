@@ -226,6 +226,7 @@ final class ExternalWallController {
         guard mayReplaceItem, !isPlaybackHeld else { return }
         let candidates = playlist.filter { !failedIDs.contains($0.id) }
         guard !candidates.isEmpty else {
+            clearPlayback()
             statusText = playlist.isEmpty ? "等待当前活动的成片" : "暂无可播放的成片"
             return
         }
@@ -268,7 +269,11 @@ final class ExternalWallController {
         let candidates = playlist.filter { !failedIDs.contains($0.id) }
         guard let id = ExternalWallPlaybackPolicy.selectNextID(
             currentID: currentItem?.id, orderedIDs: candidates.map(\.id)),
-              let next = candidates.first(where: { $0.id == id }) else { return }
+              let next = candidates.first(where: { $0.id == id }) else {
+            clearPlayback()
+            statusText = "暂无可播放的成片"
+            return
+        }
         if currentItem?.id == next.id { resumeCurrentPlayback() }
         else { present(next) }
     }
