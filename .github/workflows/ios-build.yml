@@ -92,6 +92,7 @@ jobs:
       - name: 运行测试
         run: |
           set -o pipefail
+          mkdir -p build
           # 动态选第一台可用 iPhone 模拟器（runner 镜像更新换代也不受影响）
           DEST_ID=$(xcrun simctl list devices available | grep -E "iPhone" | head -n 1 | grep -oE "[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
           if [ -z "$DEST_ID" ]; then
@@ -105,12 +106,23 @@ jobs:
             -scheme Booth360 \
             -destination "id=$DEST_ID" \
             -resultBundlePath build/TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/test-build.log
+
+      - name: 标注编译和测试错误
+        if: failure()
+        run: |
+          if [ -f build/test-build.log ]; then
+            grep -E 'error:|failed|BUILD FAILED|TEST FAILED' build/test-build.log | tail -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "$line"
+            done
+          fi
 
       - name: 保留测试结果
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Booth360-test-results
-          path: build/TestResults.xcresult
+          path: |
+            build/TestResults.xcresult
+            build/test-build.log
           retention-days: 14

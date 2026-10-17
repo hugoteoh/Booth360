@@ -106,7 +106,8 @@ private struct EditFormView: View {
                     }
                 }
                 NavigationLink {
-                    ShotModeEditorView(mode: viewModel.editingShotMode) {
+                    ShotModeEditorView(mode: viewModel.editingShotMode,
+                                       sourceDurationSeconds: viewModel.clip.durationSeconds) {
                         viewModel.updateEditingShotMode($0)
                     }
                 } label: {

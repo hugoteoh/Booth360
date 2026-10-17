@@ -3,11 +3,27 @@ import SwiftUI
 /// 分段节奏编辑器：本地草稿随操作即时回写，不需要额外保存。
 struct ShotModeEditorView: View {
     @State private var draft: ShotMode
+    private let sourceDurationSeconds: Double?
     private let onChange: (ShotMode) -> Void
 
-    init(mode: ShotMode, onChange: @escaping (ShotMode) -> Void) {
+    init(mode: ShotMode, sourceDurationSeconds: Double? = nil, onChange: @escaping (ShotMode) -> Void) {
         _draft = State(initialValue: mode)
+        if let duration = sourceDurationSeconds, duration.isFinite, duration > 0 {
+            self.sourceDurationSeconds = duration
+        } else {
+            self.sourceDurationSeconds = nil
+        }
         self.onChange = onChange
+    }
+
+    /// 重剪辑时阶段配置仍按原模式保存，界面统一换算为实际源片秒数。
+    private var timeScale: Double {
+        guard let sourceDurationSeconds else { return 1 }
+        return sourceDurationSeconds / Double(draft.recordingSeconds)
+    }
+
+    private var sourceTimePrefix: String {
+        sourceDurationSeconds == nil ? "录制" : "源片"
     }
 
     private var phaseIndices: Range<Int> {
@@ -19,7 +35,7 @@ struct ShotModeEditorView: View {
             ShotModeTimelinePhase(
                 id: index,
                 title: draft.phaseTitles[index],
-                recordingSeconds: draft.phaseDurations[index],
+                recordingSeconds: phaseDuration(at: index),
                 rate: draft.phaseRates[index],
                 color: phaseColor(at: index)
             )
@@ -50,7 +66,7 @@ struct ShotModeEditorView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label(draft.kind.displayName, systemImage: draft.kind.sfSymbol)
                     .font(.headline)
-                Text("预计成片 \(seconds(draft.estimatedOutputSeconds)) 秒")
+                Text("预计成片 \(seconds(draft.estimatedOutputSeconds * timeScale)) 秒")
                     .font(.title2.weight(.semibold).monospacedDigit())
                 Text("仅计算当前模式的变速片段，不含片头、片尾或循环。")
                     .font(.caption)
@@ -62,24 +78,31 @@ struct ShotModeEditorView: View {
 
     private var recordingSection: some View {
         Section {
-            ShotModeParameterSlider(
-                title: "总录制时长",
-                valueText: "\(draft.recordingSeconds) 秒",
-                value: recordingBinding,
-                range: Double(ShotModeKind.secondsRange.lowerBound)...Double(ShotModeKind.secondsRange.upperBound),
-                step: 1,
-                minimumText: "\(ShotModeKind.secondsRange.lowerBound) 秒",
-                maximumText: "\(ShotModeKind.secondsRange.upperBound) 秒"
-            )
+            if let sourceDurationSeconds {
+                LabeledContent("源片实际时长", value: "\(seconds(sourceDurationSeconds)) 秒")
+                    .font(.subheadline.monospacedDigit())
+            } else {
+                ShotModeParameterSlider(
+                    title: "总录制时长",
+                    valueText: "\(draft.recordingSeconds) 秒",
+                    value: recordingBinding,
+                    range: Double(ShotModeKind.secondsRange.lowerBound)...Double(ShotModeKind.secondsRange.upperBound),
+                    step: 1,
+                    minimumText: "\(ShotModeKind.secondsRange.lowerBound) 秒",
+                    maximumText: "\(ShotModeKind.secondsRange.upperBound) 秒"
+                )
+            }
         } footer: {
-            Text("调整总时长时，各阶段会按当前比例缩放。")
+            Text(sourceDurationSeconds == nil
+                 ? "调整总时长时，各阶段会按当前比例缩放。"
+                 : "源片长度固定，可调节各段的时间分配和播放倍速。")
         }
     }
 
     private var timelineSection: some View {
         Section {
             ShotModeTimelineView(
-                title: "录制时间分配",
+                title: "\(sourceTimePrefix)时间分配",
                 phases: phases,
                 usesOutputDuration: false
             )
@@ -91,18 +114,18 @@ struct ShotModeEditorView: View {
         } header: {
             Text("节奏时间条")
         } footer: {
-            Text("颜色与下方阶段对应。调整某一段时长，其余阶段按比例分配剩余录制时间。")
+            Text("颜色与下方阶段对应。调整某一段时长，其余阶段按比例分配剩余\(sourceTimePrefix)时间。")
         }
     }
 
     private func phaseSection(at index: Int) -> some View {
         Section {
             ShotModeParameterSlider(
-                title: "这一段录制时长",
-                valueText: "\(seconds(draft.phaseDurations[index])) 秒",
+                title: "这一段\(sourceTimePrefix)时长",
+                valueText: "\(seconds(phaseDuration(at: index))) 秒",
                 value: durationBinding(at: index),
                 range: phaseDurationRange,
-                step: 0.25,
+                step: sourceDurationSeconds == nil ? 0.25 : 0.01,
                 minimumText: "\(seconds(phaseDurationRange.lowerBound)) 秒",
                 maximumText: "\(seconds(phaseDurationRange.upperBound)) 秒"
             )
@@ -128,7 +151,7 @@ struct ShotModeEditorView: View {
                 Text("\(index + 1). \(draft.phaseTitles[index])")
             }
         } footer: {
-            Text("录制第 \(seconds(phaseStart(at: index)))–\(seconds(phaseEnd(at: index))) 秒。倍速越小，画面越慢，成片越长。")
+            Text("\(sourceTimePrefix)第 \(seconds(phaseStart(at: index)))–\(seconds(phaseEnd(at: index))) 秒。倍速越小，画面越慢，成片越长。")
         }
     }
 
@@ -140,7 +163,9 @@ struct ShotModeEditorView: View {
                 Label("恢复该模式默认节奏", systemImage: "arrow.counterclockwise")
             }
         } footer: {
-            Text("恢复默认分段和倍速，保留总录制时长。调整会立即生效。")
+            Text(sourceDurationSeconds == nil
+                 ? "恢复默认分段和倍速，保留总录制时长。调整会立即生效。"
+                 : "恢复默认分段和倍速，保持源片实际时长。调整会立即生效。")
         }
     }
 
@@ -154,13 +179,13 @@ struct ShotModeEditorView: View {
     private var phaseDurationRange: ClosedRange<Double> {
         let minimum = ShotMode.minimumPhaseDuration
         let otherMinimum = Double(max(0, phaseIndices.count - 1)) * minimum
-        return minimum...max(minimum, Double(draft.recordingSeconds) - otherMinimum)
+        return (minimum * timeScale)...(max(minimum, Double(draft.recordingSeconds) - otherMinimum) * timeScale)
     }
 
     private func durationBinding(at index: Int) -> Binding<Double> {
         Binding(
-            get: { draft.phaseDurations[index] },
-            set: { draft.setPhaseDuration($0, at: index) }
+            get: { phaseDuration(at: index) },
+            set: { draft.setPhaseDuration($0 / timeScale, at: index) }
         )
     }
 
@@ -172,11 +197,15 @@ struct ShotModeEditorView: View {
     }
 
     private func phaseStart(at index: Int) -> Double {
-        draft.phaseDurations.prefix(index).reduce(0, +)
+        draft.phaseDurations.prefix(index).reduce(0, +) * timeScale
     }
 
     private func phaseEnd(at index: Int) -> Double {
-        phaseStart(at: index) + draft.phaseDurations[index]
+        phaseStart(at: index) + phaseDuration(at: index)
+    }
+
+    private func phaseDuration(at index: Int) -> Double {
+        draft.phaseDurations[index] * timeScale
     }
 
     private func phaseColor(at index: Int) -> Color {
