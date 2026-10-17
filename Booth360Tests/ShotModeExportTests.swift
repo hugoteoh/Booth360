@@ -263,12 +263,16 @@ private enum TestVideoFixture {
         guard writer.startWriting() else { throw writer.error ?? fixtureError("测试视频写入启动失败") }
         writer.startSession(atSourceTime: .zero)
         do {
+            // 共享 Mac runner 首次初始化模拟器编码器可能超过 10 秒。
+            // 只为生成输入素材留出冷启动预算，仍对整个写入设置确定的上限。
+            let deadline = Date().addingTimeInterval(60)
             for index in 0..<frames {
-                let deadline = Date().addingTimeInterval(10)
                 while !input.isReadyForMoreMediaData {
                     if writer.status == .failed { throw writer.error ?? fixtureError("测试视频编码失败") }
-                    guard Date() < deadline else { throw fixtureError("测试视频编码超时") }
-                    try await Task.sleep(for: .milliseconds(1))
+                    guard Date() < deadline else {
+                        throw fixtureError("生成测试素材超时：第 \(index)/\(frames) 帧，writer status \(writer.status.rawValue)")
+                    }
+                    try await Task.sleep(for: .milliseconds(5))
                 }
                 var buffer: CVPixelBuffer?
                 let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, nil, &buffer)
