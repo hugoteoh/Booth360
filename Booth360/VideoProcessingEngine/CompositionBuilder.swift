@@ -66,7 +66,7 @@ enum CompositionBuilder {
         targetDuration: CMTime
     ) async throws {
         let audioRange = try await source.load(.timeRange)
-        let overlap = CMTimeRangeGetIntersection(sourceRange, audioRange)
+        let overlap = CMTimeRangeGetIntersection(sourceRange, otherRange: audioRange)
         guard overlap.isValid, overlap.duration > .zero else { return }
         let ratio = targetDuration.seconds / sourceRange.duration.seconds
         func mapped(_ time: CMTime) -> CMTime {
@@ -161,7 +161,7 @@ enum CompositionBuilder {
             let sourceEnd = end >= source.duration.seconds ? CMTimeRangeGetEnd(source.timeRange)
                 : source.timeRange.start + CMTime(seconds: end, preferredTimescale: timescale)
             let sourceRange = CMTimeRangeGetIntersection(
-                CMTimeRange(start: sourceStart, end: sourceEnd), source.timeRange)
+                CMTimeRange(start: sourceStart, end: sourceEnd), otherRange: source.timeRange)
             guard sourceRange.isValid, sourceRange.duration > .zero else { continue }
             let multiplier = segment.targetDurationSeconds / segment.sourceDurationSeconds
             let target = abs(multiplier - 1) < 0.000000001 ? sourceRange.duration
