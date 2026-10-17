@@ -33,6 +33,12 @@ final class GuestFlowViewModel {
     private(set) var resultPlayer: AVPlayer?
     private(set) var currentRender: RenderedVideo?
     private(set) var autoReturnRemaining: Int = 0
+    private(set) var selectedShotModeID: UUID
+
+    var shotModes: [ShotMode] { event.enabledShotModes }
+    var selectedShotMode: ShotMode {
+        shotModes.first { $0.id == selectedShotModeID } ?? event.preferredShotMode
+    }
 
     @ObservationIgnored var modelContext: ModelContext?
     /// 存储见底等禁录条件（由界面注入 monitor 判定）。
@@ -55,6 +61,7 @@ final class GuestFlowViewModel {
         self.cameraEngine = cameraEngine
         self.storage = storage
         self.uploadQueue = uploadQueue
+        self.selectedShotModeID = event.preferredShotMode.id
     }
 
     /// 进入嘉宾模式：按活动配置重配相机，装好 Motion Trigger 与远程桥。
@@ -102,11 +109,20 @@ final class GuestFlowViewModel {
 
     // MARK: - 交互入口
 
+    func selectShotMode(_ mode: ShotMode) {
+        guard phase == .welcome, shotModes.contains(where: { $0.id == mode.id }) else { return }
+        selectedShotModeID = mode.id
+        event.selectShotMode(selectedShotMode)
+        try? modelContext?.save()
+    }
+
     /// Start：仅 welcome 且相机就绪时有效（防狂点）。按钮/Motion Trigger/远程控制共用。
     func startTapped() {
         guard phase == .welcome, cameraEngine.status == .running else { return }
         if blockedProvider?() == true { return }
-        flowTask = Task { await runFlow() }
+        let mode = selectedShotMode
+        phase = .countingDown(event.countdownSeconds)
+        flowTask = Task { await runFlow(mode: mode) }
     }
 
     /// 倒数阶段取消。
@@ -114,6 +130,7 @@ final class GuestFlowViewModel {
         guard case .countingDown = phase else { return }
         flowTask?.cancel()
         flowTask = nil
+        turntable?.sendStop()
         phase = .welcome
     }
 
@@ -127,7 +144,9 @@ final class GuestFlowViewModel {
             AppLogger.ui.info("嘉宾重拍，作废成品 \(render.fileName, privacy: .public)")
         }
         cleanupResult()
-        flowTask = Task { await runFlow() }
+        let mode = selectedShotMode
+        phase = .countingDown(event.countdownSeconds)
+        flowTask = Task { await runFlow(mode: mode) }
     }
 
     /// 嘉宾确认满意：此刻才开始上传（上传完成后大屏自动出现二维码）。
@@ -140,23 +159,24 @@ final class GuestFlowViewModel {
 
     // MARK: - 主流程
 
-    private func runFlow() async {
+    private func runFlow(mode: ShotMode) async {
+        guard !Task.isCancelled else { return }
         autoReturnTask?.cancel()
+        let totalSeconds = mode.recordingSeconds
 
         // 1. 倒数（默认「倒数即转」：倒数期间转台加速到匀速）
         let countdown = event.countdownSeconds
         var spinning = false
         if countdown > 0 {
             if event.turntableSpinEnabled, turntable?.config.spinAtCountdown == true {
-                turntable?.startSpin(recordingSeconds: event.recordingSeconds, leadSeconds: countdown)
+                turntable?.startSpin(recordingSeconds: totalSeconds, leadSeconds: countdown)
                 spinning = true
             }
             for remaining in stride(from: countdown, through: 1, by: -1) {
                 phase = .countingDown(remaining)
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled {
-                    if spinning { turntable?.sendStop() }
-                    phase = .welcome
+                    // cancelCountdown / teardown 已同步停转，旧任务不再干扰下一轮。
                     return
                 }
             }
@@ -164,11 +184,10 @@ final class GuestFlowViewModel {
 
         // 2. 录制（自动停止由引擎 maxRecordedDuration 保证）；未在倒数起转的此刻起转
         if event.turntableSpinEnabled, !spinning {
-            turntable?.startSpin(recordingSeconds: event.recordingSeconds, leadSeconds: 0)
+            turntable?.startSpin(recordingSeconds: totalSeconds, leadSeconds: 0)
             spinning = true
         }
         let sourceURL = storage.newSourceClipURL()
-        let totalSeconds = event.recordingSeconds
         phase = .recording(remaining: totalSeconds)
         let tickTask = Task { [weak self] in
             var remaining = totalSeconds
@@ -194,7 +213,8 @@ final class GuestFlowViewModel {
                 height: info.height,
                 frameRate: info.frameRate,
                 lensRawValue: info.lens.rawValue,
-                eventID: event.id
+                eventID: event.id,
+                shotMode: mode
             )
             modelContext?.insert(clip)
             try? modelContext?.save()
@@ -208,7 +228,7 @@ final class GuestFlowViewModel {
             let manager = EventManager(storage: storage)
             let overlayImage = manager.loadImage(event: event, fileName: event.overlayFileName)
             let musicURL = manager.musicURL(event: event)
-            var settings = event.effectSettings
+            var settings = event.resolvedEffectSettings(mode: mode)
             settings.overlayEnabled = settings.overlayEnabled && overlayImage != nil
             settings.musicEnabled = settings.musicEnabled && musicURL != nil
 

@@ -39,7 +39,8 @@ enum CompositionBuilder {
         let track: AVAssetTrack
         let naturalSize: CGSize
         let preferredTransform: CGAffineTransform
-        let duration: CMTime
+        let timeRange: CMTimeRange
+        var duration: CMTime { timeRange.duration }
         let audioTrack: AVAssetTrack?
     }
 
@@ -47,24 +48,48 @@ enum CompositionBuilder {
         guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else { return nil }
         let naturalSize = try await videoTrack.load(.naturalSize)
         let transform = try await videoTrack.load(.preferredTransform)
-        let duration = try await asset.load(.duration)
+        let timeRange = try await videoTrack.load(.timeRange)
+        guard timeRange.isValid, timeRange.start.isNumeric,
+              timeRange.duration.seconds.isFinite, timeRange.duration > .zero else { return nil }
         let audio = try await asset.loadTracks(withMediaType: .audio).first
         return VideoSource(
             track: videoTrack, naturalSize: naturalSize,
-            preferredTransform: transform, duration: duration, audioTrack: audio)
+            preferredTransform: transform, timeRange: timeRange, audioTrack: audio)
+    }
+
+    /// sourceRange 是视频实际取用的范围；音频只取交集，并保留缺音部分的时间位置。
+    private static func insertAudio(
+        from source: AVAssetTrack,
+        range sourceRange: CMTimeRange,
+        into destination: AVMutableCompositionTrack,
+        at targetStart: CMTime,
+        targetDuration: CMTime
+    ) async throws {
+        let audioRange = try await source.load(.timeRange)
+        let overlap = CMTimeRangeGetIntersection(sourceRange, audioRange)
+        guard overlap.isValid, overlap.duration > .zero else { return }
+        let ratio = targetDuration.seconds / sourceRange.duration.seconds
+        func mapped(_ time: CMTime) -> CMTime {
+            abs(ratio - 1) < 0.000000001 ? time : CMTime(seconds: time.seconds * ratio, preferredTimescale: 600)
+        }
+        let offset = mapped(overlap.start - sourceRange.start)
+        let mappedEnd = min(targetDuration, mapped(CMTimeRangeGetEnd(overlap) - sourceRange.start))
+        let duration = mappedEnd - offset
+        guard duration > .zero else { return }
+        let at = targetStart + offset
+        try destination.insertTimeRange(overlap, of: source, at: at)
+        if CMTimeCompare(duration, overlap.duration) != 0 {
+            destination.scaleTimeRange(CMTimeRange(start: at, duration: overlap.duration), toDuration: duration)
+        }
     }
 
     static func build(_ inputs: CompositionInputs, overlayImage: CGImage?) async throws -> BuiltComposition {
         guard let main = try await loadSource(inputs.originalAsset) else {
             throw ProcessingError.noVideoTrack
         }
-        let originalDuration = main.duration.seconds
-
-        var reversedVideoTrack: AVAssetTrack?
-        var reversedDuration = 0.0
+        var reversed: VideoSource?
         if let reversedAsset = inputs.reversedAsset {
-            reversedVideoTrack = try await reversedAsset.loadTracks(withMediaType: .video).first
-            reversedDuration = try await reversedAsset.load(.duration).seconds
+            reversed = try await loadSource(reversedAsset)
         }
         var intro: VideoSource?
         if let introAsset = inputs.introAsset { intro = try await loadSource(introAsset) }
@@ -86,7 +111,7 @@ enum CompositionBuilder {
         // MARK: 片头
 
         if let intro {
-            let range = CMTimeRange(start: .zero, duration: intro.duration)
+            let range = intro.timeRange
             do {
                 try videoTrack.insertTimeRange(range, of: intro.track, at: cursor)
                 transformKeyframes.append((cursor, CropGeometry.exportTransform(
@@ -109,44 +134,53 @@ enum CompositionBuilder {
             preferredTransform: main.preferredTransform,
             renderSize: inputs.renderSize)))
 
-        var insertedSegments: [(segment: TimelineSegment, at: CMTime, target: CMTime)] = []
+        var insertedSegments: [(source: TimelineSegment.SourceKind, range: CMTimeRange, at: CMTime, target: CMTime)] = []
         for segment in inputs.segments {
-            let sourceTrack: AVAssetTrack
-            let sourceAssetDuration: Double
+            let source: VideoSource
             switch segment.source {
             case .original:
-                sourceTrack = main.track
-                sourceAssetDuration = originalDuration
+                source = main
             case .reversed:
-                guard let reversed = reversedVideoTrack else {
+                guard let reversed else {
                     throw ProcessingError.compositionFailed("缺少倒放素材")
                 }
-                sourceTrack = reversed
-                sourceAssetDuration = reversedDuration
+                source = reversed
             }
-
-            // 防浮点误差越界：起点/时长钳制到素材实际长度
-            let start = min(segment.sourceStartSeconds, max(0, sourceAssetDuration - 0.01))
-            let duration = min(segment.sourceDurationSeconds, sourceAssetDuration - start)
-            guard duration > 0.01 else { continue }
-
-            let sourceRange = CMTimeRange(
-                start: CMTime(seconds: start, preferredTimescale: 600),
-                duration: CMTime(seconds: duration, preferredTimescale: 600)
-            )
+            guard segment.sourceStartSeconds.isFinite, segment.sourceDurationSeconds.isFinite,
+                  segment.targetDurationSeconds.isFinite, segment.sourceDurationSeconds > 0,
+                  segment.targetDurationSeconds > 0 else {
+                throw ProcessingError.compositionFailed("视频阶段的时长或速度无效")
+            }
+            // TimelineSegment 使用相对视频有效区间的坐标，不以整个 asset（可能有更长音轨）为界。
+            let start = max(0, segment.sourceStartSeconds)
+            let end = min(source.duration.seconds, segment.sourceStartSeconds + segment.sourceDurationSeconds)
+            guard end > start else { continue }
+            let timescale = max(600, max(source.timeRange.start.timescale, source.duration.timescale))
+            let sourceStart = start == 0 ? source.timeRange.start
+                : source.timeRange.start + CMTime(seconds: start, preferredTimescale: timescale)
+            let sourceEnd = end >= source.duration.seconds ? CMTimeRangeGetEnd(source.timeRange)
+                : source.timeRange.start + CMTime(seconds: end, preferredTimescale: timescale)
+            let sourceRange = CMTimeRangeGetIntersection(
+                CMTimeRange(start: sourceStart, end: sourceEnd), source.timeRange)
+            guard sourceRange.isValid, sourceRange.duration > .zero else { continue }
+            let multiplier = segment.targetDurationSeconds / segment.sourceDurationSeconds
+            let target = abs(multiplier - 1) < 0.000000001 ? sourceRange.duration
+                : CMTime(seconds: sourceRange.duration.seconds * multiplier, preferredTimescale: 600)
+            guard target.isNumeric, target > .zero else {
+                throw ProcessingError.compositionFailed("视频阶段太短，无法导出")
+            }
             do {
-                try videoTrack.insertTimeRange(sourceRange, of: sourceTrack, at: cursor)
+                try videoTrack.insertTimeRange(sourceRange, of: source.track, at: cursor)
             } catch {
                 throw ProcessingError.compositionFailed(error.localizedDescription)
             }
-            let target = CMTime(seconds: segment.targetDurationSeconds, preferredTimescale: 600)
-            if abs(segment.targetDurationSeconds - duration) > 0.001 {
+            if CMTimeCompare(target, sourceRange.duration) != 0 {
                 videoTrack.scaleTimeRange(
                     CMTimeRange(start: cursor, duration: sourceRange.duration),
                     toDuration: target
                 )
             }
-            insertedSegments.append((segment, cursor, target))
+            insertedSegments.append((segment.source, sourceRange, cursor, target))
             cursor = cursor + target
         }
         guard !insertedSegments.isEmpty else {
@@ -156,7 +190,7 @@ enum CompositionBuilder {
         // MARK: 片尾
 
         if let outro {
-            let range = CMTimeRange(start: .zero, duration: outro.duration)
+            let range = outro.timeRange
             do {
                 try videoTrack.insertTimeRange(range, of: outro.track, at: cursor)
                 transformKeyframes.append((cursor, CropGeometry.exportTransform(
@@ -180,22 +214,10 @@ enum CompositionBuilder {
            let originalAudioTrack = main.audioTrack,
            let audioTrack = composition.addMutableTrack(
                withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-            for entry in insertedSegments where entry.segment.source == .original {
-                let start = min(entry.segment.sourceStartSeconds, max(0, originalDuration - 0.01))
-                let duration = min(entry.segment.sourceDurationSeconds, originalDuration - start)
-                guard duration > 0.01 else { continue }
-                let sourceRange = CMTimeRange(
-                    start: CMTime(seconds: start, preferredTimescale: 600),
-                    duration: CMTime(seconds: duration, preferredTimescale: 600)
-                )
+            for entry in insertedSegments where entry.source == .original {
                 do {
-                    try audioTrack.insertTimeRange(sourceRange, of: originalAudioTrack, at: entry.at)
-                    if abs(entry.segment.targetDurationSeconds - duration) > 0.001 {
-                        audioTrack.scaleTimeRange(
-                            CMTimeRange(start: entry.at, duration: sourceRange.duration),
-                            toDuration: entry.target
-                        )
-                    }
+                    try await insertAudio(from: originalAudioTrack, range: entry.range,
+                                          into: audioTrack, at: entry.at, targetDuration: entry.target)
                 } catch {
                     AppLogger.processing.error("原声插入失败（继续，无原声）: \(error.localizedDescription, privacy: .public)")
                 }
@@ -209,7 +231,8 @@ enum CompositionBuilder {
                withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
             for plan in extrasAudioPlan {
                 do {
-                    try extrasTrack.insertTimeRange(plan.range, of: plan.source, at: plan.at)
+                    try await insertAudio(from: plan.source, range: plan.range,
+                                          into: extrasTrack, at: plan.at, targetDuration: plan.range.duration)
                 } catch {
                     AppLogger.processing.error("片头/片尾声音插入失败（跳过）: \(error.localizedDescription, privacy: .public)")
                 }
@@ -223,7 +246,10 @@ enum CompositionBuilder {
            let musicSourceTrack = try await musicAsset.loadTracks(withMediaType: .audio).first,
            let musicTrack = composition.addMutableTrack(
                withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-            let musicDuration = try await musicAsset.load(.duration)
+            let musicRange = try await musicSourceTrack.load(.timeRange)
+            let musicDuration = musicRange.duration
+            guard musicRange.isValid, musicRange.start.isNumeric, musicDuration.seconds.isFinite,
+                  musicDuration > .zero else { throw ProcessingError.compositionFailed("音乐素材没有有效音频") }
             var fillCursor = CMTime.zero
             while fillCursor < totalDuration {
                 let remaining = totalDuration - fillCursor
@@ -231,7 +257,7 @@ enum CompositionBuilder {
                 guard chunk.seconds > 0.05 else { break }
                 do {
                     try musicTrack.insertTimeRange(
-                        CMTimeRange(start: .zero, duration: chunk),
+                        CMTimeRange(start: musicRange.start, duration: chunk),
                         of: musicSourceTrack,
                         at: fillCursor
                     )
@@ -271,7 +297,7 @@ enum CompositionBuilder {
                 guard chunk.seconds > 0.05 else { break }
                 do {
                     try overlayTrack.insertTimeRange(
-                        CMTimeRange(start: .zero, duration: chunk),
+                        CMTimeRange(start: overlaySource.timeRange.start, duration: chunk),
                         of: overlaySource.track,
                         at: fillCursor
                     )

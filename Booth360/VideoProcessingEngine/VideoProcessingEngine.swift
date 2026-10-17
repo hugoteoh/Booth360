@@ -11,6 +11,7 @@ final class VideoProcessingEngine {
 
     enum Stage: Equatable {
         case idle
+        case preparing
         case reversing
         case exporting
         case beautifying
@@ -19,6 +20,7 @@ final class VideoProcessingEngine {
         var displayText: String {
             switch self {
             case .idle: return ""
+            case .preparing: return "正在准备视频…"
             case .reversing: return "正在生成倒放素材…"
             case .exporting: return "正在导出成品…"
             case .beautifying: return "正在美颜 / 滤镜处理…"
@@ -69,11 +71,26 @@ final class VideoProcessingEngine {
     private(set) var stage: Stage = .idle
     private(set) var progress: Double = 0
 
-    var isBusy: Bool { stage == .reversing || stage == .exporting }
+    // 从第一次 await 之前持有，覆盖准备、预览、美颜和取消后的清理。
+    private(set) var isBusy = false
 
-    /// 取消标记：跨线程只读一个 Bool，独立小对象避免闭包持有引擎。
-    private final class CancelFlag {
-        var isCancelled = false
+    /// 原生导出回调/取消处理器会跨线程访问，独立对象避免闭包持有引擎。
+    private final class CancelFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+
+        var isCancelled: Bool {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return cancelled
+            }
+            set {
+                lock.lock()
+                defer { lock.unlock() }
+                cancelled = newValue
+            }
+        }
     }
 
     @ObservationIgnored private var cancelFlag = CancelFlag()
@@ -86,7 +103,10 @@ final class VideoProcessingEngine {
     func export(_ request: RenderRequest) async throws -> RenderResult {
         guard !isBusy else { throw ProcessingError.exportFailed("已有任务进行中") }
         let flag = beginWork()
+        defer { isBusy = false }
+        var outputStarted = false
         do {
+            try checkCancellation(flag)
             let built = try await prepareComposition(
                 request: request,
                 overlayImage: request.settings.overlayEnabled ? request.overlayImage : nil,
@@ -96,28 +116,35 @@ final class VideoProcessingEngine {
                 beautyEnabled: request.settings.beautyEnabled,
                 filter: request.settings.filterPreset
             )
+            try checkCancellation(flag)
+            outputStarted = true
             let result = try await runExport(
                 request: request, built: built, flag: flag,
                 progressCeiling: needsPostFX ? 0.85 : 1.0
             )
+            try checkCancellation(flag)
             if needsPostFX {
                 stage = .beautifying
                 let tmpURL = request.outputURL.deletingLastPathComponent()
                     .appendingPathComponent("postfx_\(request.outputURL.lastPathComponent)")
                 do {
-                    try await VideoPostFX.apply(
-                        inputURL: request.outputURL,
-                        outputURL: tmpURL,
-                        beautyStrength: request.settings.beautyStrength,
-                        filter: request.settings.filterPreset,
-                        codec: request.settings.codec,
-                        progressHandler: { [weak self] value in
-                            Task { @MainActor [weak self] in
-                                self?.progress = 0.85 + 0.15 * value
-                            }
-                        },
-                        isCancelled: { flag.isCancelled }
-                    )
+                    try await withTaskCancellationHandler(operation: {
+                        try await VideoPostFX.apply(
+                            inputURL: request.outputURL,
+                            outputURL: tmpURL,
+                            beautyStrength: request.settings.beautyStrength,
+                            filter: request.settings.filterPreset,
+                            codec: request.settings.codec,
+                            progressHandler: { [weak self] value in
+                                Task { @MainActor [weak self] in
+                                    guard let self, self.cancelFlag === flag, self.isBusy else { return }
+                                    self.progress = 0.85 + 0.15 * value
+                                }
+                            },
+                            isCancelled: { flag.isCancelled }
+                        )
+                    }, onCancel: { flag.isCancelled = true })
+                    try checkCancellation(flag)
                     try FileManager.default.removeItem(at: request.outputURL)
                     try FileManager.default.moveItem(at: tmpURL, to: request.outputURL)
                 } catch {
@@ -127,12 +154,17 @@ final class VideoProcessingEngine {
                     throw error
                 }
             }
+            try checkCancellation(flag)
             stage = .idle
             progress = 1
             return result
         } catch {
-            finishWithError(error, flag: flag)
-            throw error
+            let cancelled = flag.isCancelled || Task.isCancelled || error is CancellationError
+            if cancelled, outputStarted { try? FileManager.default.removeItem(at: request.outputURL) }
+            if cancelled { flag.isCancelled = true }
+            let finalError: Error = cancelled ? ProcessingError.cancelled : error
+            finishWithError(finalError, flag: flag)
+            throw finalError
         }
     }
 
@@ -142,8 +174,11 @@ final class VideoProcessingEngine {
     func makePreviewItem(_ request: RenderRequest) async throws -> AVPlayerItem {
         guard !isBusy else { throw ProcessingError.exportFailed("已有任务进行中") }
         let flag = beginWork()
+        defer { isBusy = false }
         do {
+            try checkCancellation(flag)
             let built = try await prepareComposition(request: request, overlayImage: nil, flag: flag)
+            try checkCancellation(flag)
             stage = .idle
             progress = 0
             let item = AVPlayerItem(asset: built.composition)
@@ -151,8 +186,10 @@ final class VideoProcessingEngine {
             item.audioMix = built.audioMix
             return item
         } catch {
-            finishWithError(error, flag: flag)
-            throw error
+            if Task.isCancelled || error is CancellationError { flag.isCancelled = true }
+            let finalError: Error = flag.isCancelled ? ProcessingError.cancelled : error
+            finishWithError(finalError, flag: flag)
+            throw finalError
         }
     }
 
@@ -166,8 +203,14 @@ final class VideoProcessingEngine {
     private func beginWork() -> CancelFlag {
         let flag = CancelFlag()
         cancelFlag = flag
+        isBusy = true
+        stage = .preparing
         progress = 0
         return flag
+    }
+
+    private func checkCancellation(_ flag: CancelFlag) throws {
+        if flag.isCancelled || Task.isCancelled { throw ProcessingError.cancelled }
     }
 
     private func finishWithError(_ error: Error, flag: CancelFlag) {
@@ -185,7 +228,14 @@ final class VideoProcessingEngine {
             throw ProcessingError.sourceFileMissing
         }
         let originalAsset = AVURLAsset(url: request.sourceURL)
-        let clipDuration = try await originalAsset.load(.duration).seconds
+        guard let originalVideoTrack = try await originalAsset.loadTracks(withMediaType: .video).first else {
+            throw ProcessingError.noVideoTrack
+        }
+        let videoRange = try await originalVideoTrack.load(.timeRange)
+        let clipDuration = videoRange.duration.seconds
+        guard videoRange.isValid, videoRange.start.isNumeric,
+              clipDuration.isFinite, clipDuration > 0 else { throw ProcessingError.noVideoTrack }
+        try checkCancellation(flag)
 
         // 倒放素材（缓存：源片不可变，同名缓存永远有效）
         var reversedAsset: AVAsset?
@@ -199,7 +249,8 @@ final class VideoProcessingEngine {
                     outputURL: cacheURL,
                     progress: { [weak self] value in
                         Task { @MainActor [weak self] in
-                            self?.progress = value * reverseWeight
+                            guard let self, self.cancelFlag === flag, self.isBusy else { return }
+                            self.progress = value * reverseWeight
                         }
                     },
                     isCancelled: { flag.isCancelled }
@@ -207,10 +258,16 @@ final class VideoProcessingEngine {
             }
             reversedAsset = AVURLAsset(url: cacheURL)
         }
-        if flag.isCancelled { throw ProcessingError.cancelled }
+        try checkCancellation(flag)
 
         let segments: [TimelineSegment]
-        if let kind = settings.shotKind {
+        if let mode = settings.shotMode {
+            segments = TimelineBuilder.build(
+                mode: mode,
+                clipDurationSeconds: clipDuration,
+                loopCount: settings.loopCount
+            )
+        } else if let kind = settings.shotKind {
             segments = TimelineBuilder.build(
                 kind: kind,
                 clipDurationSeconds: clipDuration,
@@ -243,7 +300,9 @@ final class VideoProcessingEngine {
             renderSize: settings.renderSize,
             outputFrameRate: 30
         )
-        return try await CompositionBuilder.build(inputs, overlayImage: overlayImage)
+        let built = try await CompositionBuilder.build(inputs, overlayImage: overlayImage)
+        try checkCancellation(flag)
+        return built
     }
 
     private func runExport(
@@ -252,6 +311,7 @@ final class VideoProcessingEngine {
         flag: CancelFlag,
         progressCeiling: Double = 1.0
     ) async throws -> RenderResult {
+        try checkCancellation(flag)
         stage = .exporting
         let baseProgress = request.settings.needsReversedAsset ? 0.45 : 0.0
         let span = progressCeiling - baseProgress
@@ -280,13 +340,16 @@ final class VideoProcessingEngine {
             }
         }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            session.exportAsynchronously {
-                continuation.resume()
+        await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                session.exportAsynchronously {
+                    continuation.resume()
+                }
             }
-        }
+        }, onCancel: { session.cancelExport() })
         pollTask.cancel()
         exportSession = nil
+        try checkCancellation(flag)
 
         switch session.status {
         case .completed:

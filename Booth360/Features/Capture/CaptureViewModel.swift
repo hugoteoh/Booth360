@@ -48,7 +48,19 @@ final class CaptureViewModel {
     var manualControls = ManualControlState()
     /// 当前活动启用的拍摄模式（拍摄页底部按钮排）。
     private(set) var shotModes: [ShotMode] = []
-    var selectedShotModeID: UUID?
+    var selectedShotModeID: UUID? {
+        didSet {
+            guard phase == .idle, hub?.guestActive != true,
+                  let mode = selectedShotMode,
+                  let context = modelContext,
+                  let event = EventManager.activeEvent(in: context) else { return }
+            event.selectShotMode(mode)
+            try? context.save()
+        }
+    }
+    var isEditingShotMode = false {
+        didSet { updateAutomation() }
+    }
 
     var selectedShotMode: ShotMode? {
         shotModes.first { $0.id == selectedShotModeID } ?? shotModes.first
@@ -56,7 +68,7 @@ final class CaptureViewModel {
 
     /// 本次录制实际时长：选中模式的时长优先，否则用页面上的「录 Ns」。
     var effectiveRecordingSeconds: Int {
-        selectedShotMode?.recordingSeconds ?? settings.recordingSeconds
+        recordingShotMode?.recordingSeconds ?? selectedShotMode?.recordingSeconds ?? settings.recordingSeconds
     }
 
     let engine: CameraEngine
@@ -74,6 +86,9 @@ final class CaptureViewModel {
     @ObservationIgnored var modelContext: ModelContext?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var elapsedTask: Task<Void, Never>?
+    @ObservationIgnored private var recordingShotMode: ShotMode?
+    @ObservationIgnored private var recordingEvent: EventTemplate?
+    @ObservationIgnored private var modesEventID: UUID?
     /// 管理员端自己的相机配置（嘉宾模式会改 engine 配置，退出后据此还原）。
     @ObservationIgnored private var adminConfiguration = CameraConfiguration.phase1Default
 
@@ -94,6 +109,10 @@ final class CaptureViewModel {
         updateAutomation()
     }
 
+    func refreshActivityConfiguration() {
+        updateAutomation()
+    }
+
     /// 按「当前活动」的开关同步自动化：拍摄模式列表、Motion Trigger、转台预连、远程状态。
     private func updateAutomation() {
         let event = modelContext.flatMap { EventManager.activeEvent(in: $0) }
@@ -102,11 +121,14 @@ final class CaptureViewModel {
         if modes != shotModes {
             shotModes = modes
         }
-        if selectedShotModeID == nil || !modes.contains(where: { $0.id == selectedShotModeID }) {
-            selectedShotModeID = modes.first?.id
+        if modesEventID != event?.id || selectedShotModeID == nil
+            || !modes.contains(where: { $0.id == selectedShotModeID }) {
+            modesEventID = event?.id
+            selectedShotModeID = event?.preferredShotMode.id
         }
 
-        if phase == .idle, review == nil, !processingEngine.isBusy,
+        if phase == .idle, review == nil, !processingEngine.isBusy, !isEditingShotMode,
+           hub?.guestActive != true,
            event?.motionTriggerEnabled == true, engine.status == .running {
             motionTrigger.start()
         } else {
@@ -122,6 +144,22 @@ final class CaptureViewModel {
             hub?.guestPhaseText = Self.phaseText(phase: phase, review: review != nil,
                                                  processing: processingEngine.isBusy)
         }
+    }
+
+    /// 编辑器实时回写当前活动；一次录制开始后不再接受参数变更。
+    func updateShotMode(_ mode: ShotMode) {
+        guard phase == .idle, review == nil, !processingEngine.isBusy,
+              hub?.guestActive != true,
+              let context = modelContext,
+              let event = EventManager.activeEvent(in: context) else { return }
+        var library = event.shotModes
+        guard let index = library.firstIndex(where: { $0.id == mode.id }) else { return }
+        library[index] = mode
+        event.shotModes = library
+        event.selectShotMode(mode)
+        do { try context.save() }
+        catch { errorMessage = "保存模式设置失败：\(error.localizedDescription)" }
+        updateAutomation()
     }
 
     private static func phaseText(phase: Phase, review: Bool, processing: Bool) -> String {
@@ -213,37 +251,45 @@ final class CaptureViewModel {
     // MARK: - 拍摄流程
 
     func startTapped() {
-        guard phase == .idle, !processingEngine.isBusy, review == nil,
+        // 活动可能由列表或 LAN 切换；锁定快照前取当前库，第一拍也使用最新节奏。
+        updateAutomation()
+        guard phase == .idle, !processingEngine.isBusy, review == nil, !isEditingShotMode,
+              hub?.guestActive != true,
               engine.status == .running else { return }
         lastSavedClip = nil
         errorMessage = nil
 
+        recordingEvent = modelContext.flatMap { EventManager.activeEvent(in: $0) }
+        recordingShotMode = selectedShotMode
+
         let countdown = settings.countdownSeconds
+        // 同步离开 idle，堵住 Task 真正启动前的重复点击/自动触发窗口。
+        phase = .countingDown(countdown)
         // 转台：默认「倒数即转」——倒数期间加速到匀速，录制第一帧就是稳定环绕
         if countdown > 0, turntableSpinEnabled, turntable?.config.spinAtCountdown == true {
             turntable?.startSpin(recordingSeconds: effectiveRecordingSeconds, leadSeconds: countdown)
             turntableSpinning = true
         }
         countdownTask = Task { [weak self] in
-            guard let self else { return }
+            guard let self, !Task.isCancelled else { return }
             if countdown > 0 {
                 for remaining in stride(from: countdown, through: 1, by: -1) {
                     self.phase = .countingDown(remaining)
                     do {
                         try await Task.sleep(for: .seconds(1))
                     } catch {
-                        self.phase = .idle
                         return
                     }
                 }
             }
+            guard !Task.isCancelled else { return }
             await self.beginRecording()
         }
     }
 
     /// 当前活动是否开了「拍摄时蓝牙控制转台旋转」。
     private var turntableSpinEnabled: Bool {
-        modelContext.flatMap { EventManager.activeEvent(in: $0) }?.turntableSpinEnabled == true
+        (recordingEvent ?? modelContext.flatMap { EventManager.activeEvent(in: $0) })?.turntableSpinEnabled == true
     }
     /// 本次拍摄是否已让转台转起来（倒数或录制阶段），用于保证有起必有停。
     @ObservationIgnored private var turntableSpinning = false
@@ -261,6 +307,8 @@ final class CaptureViewModel {
             countdownTask?.cancel()
             countdownTask = nil
             stopTurntableIfSpinning()
+            recordingShotMode = nil
+            recordingEvent = nil
             phase = .idle
         case .recording:
             engine.stopRecording()
@@ -270,6 +318,11 @@ final class CaptureViewModel {
     }
 
     private func beginRecording() async {
+        defer {
+            recordingShotMode = nil
+            recordingEvent = nil
+            phase = .idle
+        }
         let url = storage.newSourceClipURL()
         recordingElapsedSeconds = 0
         // 没在倒数阶段起转（不倒数 / 关了倒数即转）→ 录制开始时起转
@@ -290,7 +343,6 @@ final class CaptureViewModel {
             elapsedTask?.cancel()
             phase = .saving
             let clip = saveClipRecord(info)
-            phase = .idle
             // 有「当前活动」→ 按模板自动处理并弹成片确认（与嘉宾模式同一逻辑）
             if let clip {
                 await autoProcessWithActiveEvent(clip: clip, sourceURL: info.url)
@@ -298,7 +350,6 @@ final class CaptureViewModel {
         } catch {
             stopTurntableIfSpinning()
             elapsedTask?.cancel()
-            phase = .idle
             storage.deleteFileIfExists(at: url)
             errorMessage = (error as? CameraError)?.errorDescription ?? error.localizedDescription
         }
@@ -328,7 +379,8 @@ final class CaptureViewModel {
             height: info.height,
             frameRate: info.frameRate,
             lensRawValue: info.lens.rawValue,
-            eventID: EventManager.activeEventID   // 源片段也归属当前活动
+            eventID: recordingEvent?.id,
+            shotMode: recordingShotMode
         )
         modelContext.insert(clip)
         do {
@@ -345,7 +397,7 @@ final class CaptureViewModel {
     // MARK: - 模板自动处理（拍完 → 处理中 → 成片确认）
 
     private func autoProcessWithActiveEvent(clip: SourceClip, sourceURL: URL) async {
-        guard let modelContext, let event = EventManager.activeEvent(in: modelContext) else {
+        guard let modelContext, let event = recordingEvent else {
             // 没有当前活动：退回"已保存 + 处理/预览"手动入口
             lastSavedClip = clip
             return
@@ -353,11 +405,9 @@ final class CaptureViewModel {
         let manager = EventManager(storage: storage)
         let overlayImage = manager.loadImage(event: event, fileName: event.overlayFileName)
         let musicURL = manager.musicURL(event: event)
-        var effect = event.effectSettings
+        var effect = event.resolvedEffectSettings(mode: clip.capturedShotMode)
         effect.overlayEnabled = effect.overlayEnabled && overlayImage != nil
         effect.musicEnabled = effect.musicEnabled && musicURL != nil
-        // 选中的拍摄模式曲线优先于活动里的 speed/style
-        effect.shotKindRaw = selectedShotMode?.kind.rawValue
 
         let outputURL = storage.newRenderURL()
         do {

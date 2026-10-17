@@ -26,13 +26,43 @@ enum TimelineBuilder {
 
     // MARK: - 入口（拍摄模式曲线）
 
+    /// 活动自定义阶段按实际素材时长缩放；提前结束录制也完整覆盖实际源片。
+    /// 阶段仅正放，循环次数按导出设置限制在 1...3。
+    static func build(
+        mode: ShotMode,
+        clipDurationSeconds duration: Double,
+        loopCount: Int
+    ) -> [TimelineSegment] {
+        guard duration.isFinite, duration > 0 else { return [] }
+        let phaseDurations = mode.phaseDurations
+        let phaseRates = mode.phaseRates
+        let configuredDuration = Double(mode.recordingSeconds)
+        var sourceStart = 0.0
+        var configuredEnd = 0.0
+        var single: [TimelineSegment] = []
+        for index in phaseDurations.indices {
+            configuredEnd += phaseDurations[index]
+            let sourceEnd = index == phaseDurations.count - 1 ? duration : duration * (configuredEnd / configuredDuration)
+            let sourceLength = sourceEnd - sourceStart
+            let targetLength = sourceLength / phaseRates[index]
+            guard sourceLength.isFinite, sourceLength > 0, targetLength.isFinite, targetLength > 0 else { return [] }
+            single.append(TimelineSegment(
+                source: .original,
+                sourceStartSeconds: sourceStart,
+                sourceDurationSeconds: sourceLength,
+                targetDurationSeconds: targetLength))
+            sourceStart = sourceEnd
+        }
+        return Array(repeating: single, count: min(max(1, loopCount), 3)).flatMap { $0 }
+    }
+
     /// 按 ShotModeKind 的多段曲线展开时间轴（支持中段插倒放），再按 loopCount 重复。
     static func build(
         kind: ShotModeKind,
         clipDurationSeconds duration: Double,
         loopCount: Int
     ) -> [TimelineSegment] {
-        guard duration > 0 else { return [] }
+        guard duration.isFinite, duration > 0 else { return [] }
         let single: [TimelineSegment] = kind.ops.map { op in
             let start = op.fromFraction * duration
             let length = (op.toFraction - op.fromFraction) * duration
@@ -64,7 +94,7 @@ enum TimelineBuilder {
         style: PlaybackStyle,
         loopCount: Int
     ) -> [TimelineSegment] {
-        guard duration > 0 else { return [] }
+        guard duration.isFinite, duration > 0 else { return [] }
         let forward = speedSegments(clipDurationSeconds: duration, effect: effect)
 
         let single: [TimelineSegment]
@@ -88,6 +118,7 @@ enum TimelineBuilder {
     // MARK: - 变速分段（正放方向）
 
     static func speedSegments(clipDurationSeconds duration: Double, effect: SpeedEffect) -> [TimelineSegment] {
+        guard duration.isFinite, duration > 0 else { return [] }
         switch effect {
         case .normal:
             return [TimelineSegment(

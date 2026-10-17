@@ -51,6 +51,9 @@ struct GuestModeView: View {
                     storage: storage,
                     blocked: monitor.blocksNewRecording,
                     warnings: monitor.warnings.filter(\.isCritical),
+                    shotModes: viewModel.shotModes,
+                    selectedModeID: viewModel.selectedShotMode.id,
+                    onSelectMode: { viewModel.selectShotMode($0) },
                     onStart: { viewModel.startTapped() }
                 )
             case .countingDown(let remaining):
@@ -174,6 +177,9 @@ private struct WelcomeOverlay: View {
     let storage: FileStorageService
     let blocked: Bool
     let warnings: [SystemStatusMonitor.Warning]
+    let shotModes: [ShotMode]
+    let selectedModeID: UUID
+    let onSelectMode: (ShotMode) -> Void
     let onStart: () -> Void
 
     var body: some View {
@@ -211,6 +217,38 @@ private struct WelcomeOverlay: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .multilineTextAlignment(.center)
                 Spacer()
+
+                if shotModes.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(shotModes) { mode in
+                                Button { onSelectMode(mode) } label: {
+                                    VStack(spacing: 5) {
+                                        Text(mode.kind.displayName).font(.headline)
+                                        Text("录制 \(mode.recordingSeconds) 秒")
+                                            .font(.caption.monospacedDigit())
+                                    }
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 18)
+                                    .padding(.vertical, 12)
+                                    .background(mode.id == selectedModeID ? Color.accentColor : Color.black.opacity(0.55),
+                                                in: RoundedRectangle(cornerRadius: 14))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 14)
+                                            .stroke(.white.opacity(mode.id == selectedModeID ? 1 : 0.25), lineWidth: 1)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(mode.id == selectedModeID ? .isSelected : [])
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                } else if let mode = shotModes.first {
+                    Text("\(mode.kind.displayName) · 录制 \(mode.recordingSeconds) 秒")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                }
 
                 if blocked {
                     Text("存储空间不足，暂停拍摄，请联系工作人员")

@@ -143,8 +143,9 @@ final class TimelineBuilderTests: XCTestCase {
         let migrated = ShotMode.migrated(from: saved)
         XCTAssertEqual(migrated.count, ShotModeKind.allCases.count, "补齐当前全部模式")
         XCTAssertFalse(migrated.contains { $0.kindRaw == "boomerang" }, "下架模式被丢弃")
-        XCTAssertEqual(migrated.first { $0.kind == .rushback }?.recordingSeconds, 7, "用户设置保留")
-        XCTAssertEqual(migrated.first { $0.kind == .rushback }?.enabled, true)
+        XCTAssertEqual(migrated.first { $0.kind == .doubleSlow }?.recordingSeconds, 7, "旧回冲条目迁到双重慢镜且保留时长")
+        XCTAssertEqual(migrated.first { $0.kind == .doubleSlow }?.enabled, true)
+        XCTAssertEqual(migrated.first { $0.kind == .doubleSlow }?.id, saved[0].id)
         XCTAssertTrue(migrated.contains { $0.kind == .slowFastSlow }, "新增的慢-快-慢在列")
     }
 
@@ -157,5 +158,67 @@ final class TimelineBuilderTests: XCTestCase {
         let segments = TimelineBuilder.build(
             clipDurationSeconds: 5, effect: .normal, style: .forward, loopCount: 0)
         XCTAssertEqual(segments.count, 1)
+    }
+
+    // MARK: - 自定义正放阶段
+
+    func testActiveModesCoverActualClipExactlyWithoutReverse() {
+        for kind in ShotModeKind.activeKinds {
+            let mode = ShotMode(kind: kind, enabled: true, recordingSeconds: 10)
+            for actualDuration in [0.13, 1.731, 5.25, 9.997, 10.0, 12.345] {
+                let segments = TimelineBuilder.build(mode: mode, clipDurationSeconds: actualDuration, loopCount: 1)
+                XCTAssertEqual(segments.count, mode.phaseDurations.count)
+                var cursor = 0.0
+                for (index, segment) in segments.enumerated() {
+                    XCTAssertEqual(segment.source, .original)
+                    XCTAssertEqual(segment.sourceStartSeconds, cursor, accuracy: 0.000000001)
+                    XCTAssertTrue(segment.sourceDurationSeconds.isFinite && segment.sourceDurationSeconds > 0)
+                    XCTAssertTrue(segment.targetDurationSeconds.isFinite && segment.targetDurationSeconds > 0)
+                    XCTAssertEqual(
+                        segment.sourceDurationSeconds / segment.targetDurationSeconds,
+                        mode.phaseRates[index], accuracy: accuracy)
+                    cursor += segment.sourceDurationSeconds
+                }
+                XCTAssertEqual(cursor, actualDuration, accuracy: 0.000000001)
+                XCTAssertEqual(
+                    TimelineBuilder.totalDuration(of: segments),
+                    mode.estimatedOutputSeconds * actualDuration / Double(mode.recordingSeconds),
+                    accuracy: accuracy)
+            }
+        }
+    }
+
+    func testCustomStagesScaleToAnEarlyStopInsteadOfTruncatingLastStages() {
+        var mode = ShotMode(kind: .fastSlowFast, enabled: true, recordingSeconds: 10)
+        mode.setPhaseDuration(4, at: 0) // 源份额 4:4:2
+        mode.setPhaseRate(0.25, at: 0)
+        mode.setPhaseRate(1, at: 1)
+        mode.setPhaseRate(4, at: 2)
+        let segments = TimelineBuilder.build(mode: mode, clipDurationSeconds: 3.7, loopCount: 1)
+        XCTAssertEqual(segments.map(\.sourceDurationSeconds)[0], 1.48, accuracy: accuracy)
+        XCTAssertEqual(segments[1].sourceDurationSeconds, 1.48, accuracy: accuracy)
+        XCTAssertEqual(segments[2].sourceDurationSeconds, 0.74, accuracy: accuracy)
+        XCTAssertEqual(segments[0].targetDurationSeconds, 5.92, accuracy: accuracy)
+        XCTAssertEqual(segments[1].targetDurationSeconds, 1.48, accuracy: accuracy)
+        XCTAssertEqual(segments[2].targetDurationSeconds, 0.185, accuracy: accuracy)
+        XCTAssertEqual(segments[2].sourceStartSeconds + segments[2].sourceDurationSeconds, 3.7, accuracy: accuracy)
+    }
+
+    func testCustomModeLoopsRepeatTheSameCompleteSourceCoverage() {
+        let mode = ShotMode(kind: .doubleSlow, enabled: true)
+        let single = TimelineBuilder.build(mode: mode, clipDurationSeconds: 7.125, loopCount: 1)
+        let repeated = TimelineBuilder.build(mode: mode, clipDurationSeconds: 7.125, loopCount: 3)
+        XCTAssertEqual(repeated, single + single + single)
+        XCTAssertEqual(TimelineBuilder.build(mode: mode, clipDurationSeconds: 7.125, loopCount: 0), single)
+        XCTAssertEqual(TimelineBuilder.build(mode: mode, clipDurationSeconds: 7.125, loopCount: Int.max), repeated)
+    }
+
+    func testInvalidSourceDurationsNeverCreateNonFiniteSegments() {
+        let mode = ShotMode(kind: .doubleSlow, enabled: true)
+        for invalid in [0, -1, Double.nan, Double.infinity, -Double.infinity] {
+            XCTAssertTrue(TimelineBuilder.build(mode: mode, clipDurationSeconds: invalid, loopCount: 1).isEmpty)
+            XCTAssertTrue(TimelineBuilder.build(kind: .rushback, clipDurationSeconds: invalid, loopCount: 1).isEmpty)
+            XCTAssertTrue(TimelineBuilder.build(clipDurationSeconds: invalid, effect: .normal, style: .forward, loopCount: 1).isEmpty)
+        }
     }
 }

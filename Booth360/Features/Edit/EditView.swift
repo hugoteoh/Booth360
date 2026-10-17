@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct EditView: View {
     let clip: SourceClip
     let storage: FileStorageService
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: EditViewModel?
 
     var body: some View {
@@ -15,7 +16,11 @@ struct EditView: View {
                 EditFormView(viewModel: viewModel)
             } else {
                 ProgressView()
-                    .task { viewModel = EditViewModel(clip: clip, storage: storage) }
+                    .task {
+                        let model = EditViewModel(clip: clip, storage: storage)
+                        model.configureShotModes(in: modelContext)
+                        viewModel = model
+                    }
             }
         }
         .navigationTitle("效果与导出")
@@ -91,19 +96,28 @@ private struct EditFormView: View {
                                value: String(format: "%.1f 秒", viewModel.estimatedOutputSeconds))
             }
 
-            Section("效果") {
-                Picker("变速", selection: $viewModel.settings.speed) {
-                    ForEach(SpeedEffect.allCases) { effect in
-                        Text(effect.displayName).tag(effect)
+            Section {
+                Picker("拍摄模式", selection: Binding(
+                    get: { viewModel.editingShotMode.kind },
+                    set: { viewModel.selectShotMode($0) }
+                )) {
+                    ForEach(ShotModeKind.allCases) { kind in
+                        Text(kind.displayName).tag(kind)
                     }
                 }
-                Picker("播放方式", selection: $viewModel.settings.style) {
-                    ForEach(PlaybackStyle.allCases) { style in
-                        Text(style.displayName).tag(style)
+                NavigationLink {
+                    ShotModeEditorView(mode: viewModel.editingShotMode) {
+                        viewModel.updateEditingShotMode($0)
                     }
+                } label: {
+                    Label("调节分段时长与倍速", systemImage: "slider.horizontal.3")
                 }
                 Stepper("循环 ×\(viewModel.settings.loopCount)",
                         value: $viewModel.settings.loopCount, in: 1...3)
+            } header: {
+                Text("模式与节奏")
+            } footer: {
+                Text("分段按源片实际长度等比例应用。这里的调节只用于本次剪辑，活动中的拍摄预设保持不变。")
             }
 
             Section {

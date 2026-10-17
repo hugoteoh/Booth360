@@ -29,6 +29,11 @@ final class EditViewModel {
     var presentation: PlaybackPresentation?
     var errorMessage: String?
     var toastMessage: String?
+    private(set) var availableShotModes = ShotMode.defaultLibrary
+
+    var editingShotMode: ShotMode {
+        settings.shotMode ?? availableShotModes[0]
+    }
 
     private(set) var overlayFileName: String?
     private(set) var overlayImage: UIImage?
@@ -60,18 +65,44 @@ final class EditViewModel {
         settings.musicEnabled = musicFileName != nil && defaults.bool(forKey: "booth360.musicEnabled")
         settings.overlayVideoEnabled = overlayVideoFileName != nil
             && defaults.bool(forKey: "booth360.overlayVideoEnabled")
+        updateEditingShotMode(clip.capturedShotMode ?? availableShotModes[0])
+    }
+
+    /// 旧源片可使用所属活动的模式；新源片始终保留拍摄时的节奏快照。
+    func configureShotModes(in context: ModelContext) {
+        guard let eventID = clip.eventID else { return }
+        let descriptor = FetchDescriptor<EventTemplate>(predicate: #Predicate { $0.id == eventID })
+        guard let event = try? context.fetch(descriptor).first else { return }
+        availableShotModes = event.shotModes
+        updateEditingShotMode(clip.capturedShotMode ?? event.preferredShotMode)
+    }
+
+    func selectShotMode(_ kind: ShotModeKind) {
+        guard !engine.isBusy else { return }
+        let mode = availableShotModes.first { $0.kind == kind }
+            ?? ShotMode(kind: kind, enabled: true)
+        updateEditingShotMode(mode)
+    }
+
+    func updateEditingShotMode(_ mode: ShotMode) {
+        guard !engine.isBusy else { return }
+        settings.shotMode = mode
+        settings.shotKindRaw = mode.kindRaw
+        if let index = availableShotModes.firstIndex(where: { $0.kind == mode.kind }) {
+            availableShotModes[index] = mode
+        }
     }
 
     var sourceURL: URL { storage.sourceClipURL(fileName: clip.fileName) }
 
     /// 成品预计时长（按当前设置估算）。
     var estimatedOutputSeconds: Double {
-        TimelineBuilder.totalDuration(of: TimelineBuilder.build(
+        let segments = TimelineBuilder.build(
+            mode: editingShotMode,
             clipDurationSeconds: clip.durationSeconds,
-            effect: settings.speed,
-            style: settings.style,
             loopCount: settings.loopCount
-        ))
+        )
+        return TimelineBuilder.totalDuration(of: segments)
     }
 
     // MARK: - 素材导入
@@ -188,9 +219,9 @@ final class EditViewModel {
                 durationSeconds: result.durationSeconds,
                 width: Int(result.renderSize.width),
                 height: Int(result.renderSize.height),
-                settingsSummary: settings.summaryText,
+                settingsSummary: request.settings.summaryText,
                 sourceClipID: clip.id,
-                eventID: EventManager.activeEventID
+                eventID: clip.eventID ?? EventManager.activeEventID
             )
             modelContext.insert(rendered)
             try? modelContext.save()

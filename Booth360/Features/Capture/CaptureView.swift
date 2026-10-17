@@ -14,8 +14,19 @@ struct CaptureView: View {
     @Environment(TurntableService.self) private var turntable
     /// 拍完点「处理/预览」直接跳编辑页。
     @State private var editingClip: SourceClip?
+    /// 管理员待机时可直接调整当前模式，嘉宾流程不显示此入口。
+    @State private var editingShotMode: ShotMode?
+    @AppStorage("booth360.activeEventID") private var activeEventIDRaw = ""
 
     private var engine: CameraEngine { viewModel.engine }
+    private var activeEventRevision: Date? {
+        EventManager.activeEvent(in: modelContext)?.updatedAt
+    }
+
+    private var canEditShotMode: Bool {
+        viewModel.phase == .idle && !viewModel.processingEngine.isBusy
+            && viewModel.review == nil && !hub.guestActive
+    }
 
     var body: some View {
         ZStack {
@@ -95,6 +106,7 @@ struct CaptureView: View {
             if engine.status == .idle {
                 await viewModel.configureCamera()
             }
+            viewModel.refreshActivityConfiguration()
         }
         // 电脑控制台「开始拍摄」→ 触发主页快门（嘉宾模式开着时由嘉宾流程响应）
         .onChange(of: hub.startRequestID) { _, _ in
@@ -102,8 +114,37 @@ struct CaptureView: View {
                 viewModel.startTapped()
             }
         }
+        .onChange(of: activeEventIDRaw) { _, _ in
+            closeShotModeEditor()
+            viewModel.refreshActivityConfiguration()
+        }
+        .onChange(of: activeEventRevision) { _, _ in
+            viewModel.refreshActivityConfiguration()
+        }
         .navigationDestination(item: $editingClip) { clip in
             EditView(clip: clip, storage: viewModel.storage)
+        }
+        .sheet(item: $editingShotMode, onDismiss: {
+            viewModel.isEditingShotMode = false
+        }) { mode in
+            NavigationStack {
+                ShotModeEditorView(mode: mode) { updated in
+                    guard canEditShotMode else { return }
+                    viewModel.updateShotMode(updated)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { closeShotModeEditor() }
+                    }
+                }
+            }
+            .presentationDetents([.large])
+        }
+        .onChange(of: editingShotMode?.id) { _, modeID in
+            viewModel.isEditingShotMode = modeID != nil
+        }
+        .onChange(of: canEditShotMode) { _, canEdit in
+            if !canEdit { closeShotModeEditor() }
         }
         .alert("出错了", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -283,6 +324,7 @@ struct CaptureView: View {
             if viewModel.phase == .idle {
                 if !viewModel.shotModes.isEmpty {
                     shotModeRow
+                    currentShotModeEditorButton
                 }
                 settingsRow
             }
@@ -327,6 +369,36 @@ struct CaptureView: View {
             }
             .padding(.horizontal, 16)
         }
+    }
+
+    @ViewBuilder
+    private var currentShotModeEditorButton: some View {
+        if let mode = viewModel.selectedShotMode, !hub.guestActive {
+            Button {
+                guard canEditShotMode else { return }
+                viewModel.isEditingShotMode = true
+                editingShotMode = mode
+            } label: {
+                VStack(spacing: 4) {
+                    Label("调节当前模式", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                    Text("\(mode.kind.displayName) · 录制 \(mode.recordingSeconds) 秒")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
+                .background(Color.accentColor.opacity(0.85), in: Capsule())
+            }
+            .disabled(!canEditShotMode)
+            .accessibilityLabel("调节当前\(mode.kind.displayName)模式的时长和倍速")
+        }
+    }
+
+    private func closeShotModeEditor() {
+        editingShotMode = nil
+        viewModel.isEditingShotMode = false
     }
 
     private var settingsRow: some View {

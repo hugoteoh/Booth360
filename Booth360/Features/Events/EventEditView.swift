@@ -21,7 +21,7 @@ struct EventEditView: View {
     @State private var errorMessage: String?
     /// 效果参数以值类型草稿绑定，onChange 回写 Data。
     @State private var effectDraft = EffectSettings()
-    /// 拍摄模式草稿（勾选启用 + 每模式时长）。
+    /// 拍摄模式草稿（启用状态、录制时长及各阶段节奏）。
     @State private var shotModesDraft: [ShotMode] = []
 
     private var manager: EventManager { EventManager(storage: storage) }
@@ -66,33 +66,13 @@ struct EventEditView: View {
             }
 
             Section {
-                ForEach($shotModesDraft) { $mode in
-                    HStack(spacing: 12) {
-                        Toggle(isOn: $mode.enabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label(mode.kind.displayName, systemImage: mode.kind.sfSymbol)
-                                Text(mode.kind.curveDescription)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Menu {
-                            ForEach(Array(ShotModeKind.secondsRange), id: \.self) { seconds in
-                                Button("\(seconds) 秒") { mode.recordingSeconds = seconds }
-                            }
-                        } label: {
-                            Text("\(mode.recordingSeconds)s")
-                                .font(.footnote.weight(.semibold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Color(.systemGray5), in: Capsule())
-                        }
-                    }
+                ForEach(shotModesDraft.indices, id: \.self) { index in
+                    shotModeSettingsRow(at: index)
                 }
             } header: {
                 Text("拍摄模式（勾选的会出现在拍摄页底部）")
             } footer: {
-                Text("每个模式可设独立录制时长；含「回旋」的模式处理时间稍长（需生成倒放素材，二次起走缓存）。")
+                Text("至少启用一个模式。点击「调节节奏」可调整录制时长、每段时长与倍速，改动立即保存。")
             }
 
             Section("效果参数") {
@@ -156,7 +136,11 @@ struct EventEditView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             effectDraft = event.effectSettings
-            shotModesDraft = event.shotModes
+            var modes = event.shotModes
+            if !modes.contains(where: \.enabled), !modes.isEmpty {
+                modes[0].enabled = true
+            }
+            shotModesDraft = modes
         }
         .onChange(of: effectDraft) { _, newValue in
             event.effectSettings = newValue
@@ -186,6 +170,55 @@ struct EventEditView: View {
     }
 
     // MARK: - 行组件
+
+    private func shotModeSettingsRow(at index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: shotModeEnabledBinding(at: index)) {
+                Label(shotModesDraft[index].kind.displayName,
+                      systemImage: shotModesDraft[index].kind.sfSymbol)
+            }
+            .disabled(isLastEnabledMode(at: index))
+            .accessibilityHint(isLastEnabledMode(at: index) ? "至少保留一个启用的拍摄模式" : "控制此模式是否显示在拍摄页")
+
+            NavigationLink {
+                ShotModeEditorView(mode: shotModesDraft[index]) { updated in
+                    guard shotModesDraft.indices.contains(index),
+                          shotModesDraft[index].id == updated.id else { return }
+                    shotModesDraft[index] = updated
+                }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("调节节奏")
+                            .font(.subheadline.weight(.medium))
+                        Text(shotModesDraft[index].kind.curveDescription)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("录制 \(shotModesDraft[index].recordingSeconds) 秒")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityLabel("调节\(shotModesDraft[index].kind.displayName)模式节奏")
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func isLastEnabledMode(at index: Int) -> Bool {
+        shotModesDraft[index].enabled && shotModesDraft.filter(\.enabled).count == 1
+    }
+
+    private func shotModeEnabledBinding(at index: Int) -> Binding<Bool> {
+        Binding(
+            get: { shotModesDraft[index].enabled },
+            set: { enabled in
+                guard enabled || !isLastEnabledMode(at: index) else { return }
+                shotModesDraft[index].enabled = enabled
+            }
+        )
+    }
 
     private func assetPickerRow(
         title: String,

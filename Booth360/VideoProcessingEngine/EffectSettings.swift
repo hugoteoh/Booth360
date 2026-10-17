@@ -140,8 +140,11 @@ struct EffectSettings: Equatable, Codable {
     /// 拍摄模式曲线（非空时优先于 speed/style 生效）。
     var shotKindRaw: String?
 
+    /// 新模式的完整阶段配置快照，优先于历史 shotKindRaw 与 speed/style。
+    var shotMode: ShotMode?
+
     var shotKind: ShotModeKind? {
-        shotKindRaw.flatMap { ShotModeKind(rawValue: $0) }
+        shotMode?.kind ?? shotKindRaw.flatMap { ShotModeKind(rawValue: $0) }
     }
 
     init() {}
@@ -167,13 +170,19 @@ struct EffectSettings: Equatable, Codable {
         resolution = try container.decodeIfPresent(OutputResolution.self, forKey: .resolution) ?? .r1080
         codec = try container.decodeIfPresent(OutputCodec.self, forKey: .codec) ?? .hevc
         shotKindRaw = try container.decodeIfPresent(String.self, forKey: .shotKindRaw)
+        shotMode = try container.decodeIfPresent(ShotMode.self, forKey: .shotMode)
     }
 
     /// 原声只在“原速 + 正放”时可用（变速/倒放会导致声音变调或倒转，一律丢弃）。
-    var canUseOriginalAudio: Bool { speed == .normal && style == .forward }
+    var canUseOriginalAudio: Bool {
+        if let shotMode { return shotMode.phaseRates.allSatisfy { $0 == 1 } }
+        if let shotKind { return !shotKind.usesReverse && shotKind.ops.allSatisfy { $0.rate == 1 } }
+        return speed == .normal && style == .forward
+    }
 
     /// 倒放和 Boomerang（或含倒放段的拍摄模式曲线）需要先生成倒序中间文件。
     var needsReversedAsset: Bool {
+        if shotMode != nil { return false }
         if let shotKind { return shotKind.usesReverse }
         return style != .forward
     }
@@ -204,7 +213,9 @@ struct EffectSettings: Equatable, Codable {
     /// 存入 RenderedVideo 的可读描述，如 "慢-快-慢 · Boomerang · ×2 · 美颜 · 9:16 1080p HEVC"。
     var summaryText: String {
         var parts: [String]
-        if let shotKind {
+        if let shotMode {
+            parts = [shotMode.kind.displayName, shotMode.phaseRates.map { String(format: "%g×", $0) }.joined(separator: "→")]
+        } else if let shotKind {
             parts = [shotKind.displayName]
         } else {
             parts = [speed.displayName, style.displayName]

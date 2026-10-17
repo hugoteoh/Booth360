@@ -111,6 +111,38 @@ extension EventTemplate {
     }
 
     var enabledShotModes: [ShotMode] {
-        shotModes.filter(\.enabled)
+        let library = shotModes
+        let enabled = library.filter(\.enabled)
+        // 旧活动可能把所有模式关掉；仍提供一个可拍摄的安全默认值。
+        if !enabled.isEmpty { return enabled }
+        var fallback = library.first ?? ShotMode.defaultLibrary[0]
+        fallback.enabled = true
+        return [fallback]
+    }
+
+    /// 从当前库解析选择，避免活动调节后仍使用 effectSettings 中过时的快照。
+    var preferredShotMode: ShotMode {
+        let modes = enabledShotModes
+        let settings = effectSettings
+        if let snapshot = settings.shotMode,
+           let current = modes.first(where: { $0.id == snapshot.id }) { return current }
+        let kindRaw = settings.shotMode?.kindRaw ?? settings.shotKindRaw
+        return modes.first(where: { $0.kindRaw == kindRaw }) ?? modes[0]
+    }
+
+    func selectShotMode(_ mode: ShotMode) {
+        var settings = effectSettings
+        settings.shotMode = mode
+        settings.shotKindRaw = mode.kindRaw
+        effectSettings = settings
+    }
+
+    /// 拍摄时传入锁定的配置，自动处理与嘉宾流程使用同一套参数。
+    func resolvedEffectSettings(mode: ShotMode? = nil) -> EffectSettings {
+        var settings = effectSettings
+        let selected = mode ?? preferredShotMode
+        settings.shotMode = selected
+        settings.shotKindRaw = selected.kindRaw
+        return settings
     }
 }

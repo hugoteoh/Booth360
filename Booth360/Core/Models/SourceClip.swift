@@ -17,6 +17,8 @@ final class SourceClip {
     var isFavorite: Bool
     /// 所属活动（嘉宾模式拍摄时记录）。
     var eventID: UUID?
+    /// 按下开始时的模式快照；活动之后改节奏，不影响这段源片的重新剪辑。
+    var shotModeData: Data? = nil
 
     init(
         id: UUID = UUID(),
@@ -28,7 +30,8 @@ final class SourceClip {
         frameRate: Double,
         lensRawValue: String,
         isFavorite: Bool = false,
-        eventID: UUID? = nil
+        eventID: UUID? = nil,
+        shotMode: ShotMode? = nil
     ) {
         self.id = id
         self.fileName = fileName
@@ -40,10 +43,16 @@ final class SourceClip {
         self.lensRawValue = lensRawValue
         self.isFavorite = isFavorite
         self.eventID = eventID
+        self.shotModeData = shotMode.flatMap { try? JSONEncoder().encode($0) }
     }
 }
 
 extension SourceClip {
+    var capturedShotMode: ShotMode? {
+        guard let shotModeData else { return nil }
+        return try? JSONDecoder().decode(ShotMode.self, from: shotModeData)
+    }
+
     /// "1920×1080 · 60fps · 12.0s"
     var summaryText: String {
         let seconds = String(format: "%.1f", durationSeconds)
