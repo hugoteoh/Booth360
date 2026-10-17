@@ -2,197 +2,237 @@ import SwiftUI
 import UIKit
 import AVFoundation
 
-/// 电视专用画面，由外接屏幕窗口承载；不复用手机相机预览。
+/// 与网页大屏共用三种排版；只有当前卡片承载播放器，其余使用缓存静态画面。
 @MainActor
 struct ExternalWallView: View {
     @State private var controller = ExternalWallController.shared
-    @State private var isVideoReady = false
 
     var body: some View {
         GeometryReader { geometry in
-            let layout = ExternalWallLayout(size: geometry.size)
             ZStack {
-                Color.black
-                wallContent(layout: layout)
-                    .frame(width: layout.width, height: layout.height)
-                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                wallBackground(size: geometry.size)
+                if !controller.isEnabled {
+                    waitingView(title: "电视大屏未开启", detail: "在手机设置中开启独立电视大屏", size: geometry.size)
+                } else if controller.items.isEmpty {
+                    waitingView(title: "精彩即将开始…", detail: "Waiting for the first video…", size: geometry.size)
+                } else {
+                    wallCards(size: geometry.size)
+                }
             }
         }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
     }
 
-    @ViewBuilder
-    private func wallContent(layout: ExternalWallLayout) -> some View {
-        if !controller.isEnabled {
-            placeholder(
-                title: "电视大屏未开启",
-                detail: "请在手机的 Booth360 设置中开启独立电视大屏。",
-                symbol: "tv",
-                layout: layout
-            )
-        } else if let item = controller.currentItem {
-            playbackContent(item: item, layout: layout)
-        } else {
-            placeholder(
-                title: "等待最新成片",
-                detail: "在手机拍摄完成后，视频会在这里自动播放。",
-                symbol: "video",
-                layout: layout
-            )
-        }
+    private var activeIndex: Int {
+        controller.items.firstIndex { $0.id == controller.currentItem?.id } ?? 0
     }
 
-    private func playbackContent(item: ExternalWallItem, layout: ExternalWallLayout) -> some View {
-        HStack(spacing: layout.gap) {
-            videoColumn(item: item, layout: layout)
-                .frame(width: layout.videoColumnWidth)
-            downloadColumn(item: item, layout: layout)
-                .frame(width: layout.downloadColumnWidth)
+    private func wallBackground(size: CGSize) -> some View {
+        ZStack {
+            Color(red: 6 / 255, green: 8 / 255, blue: 13 / 255)
+            RadialGradient(
+                stops: [.init(color: .clear, location: 0.62),
+                        .init(color: .black.opacity(0.34), location: 1)],
+                center: UnitPoint(x: 0.5, y: 0.4),
+                startRadius: 0,
+                endRadius: max(size.width, size.height) * 0.9
+            )
         }
-        .padding(layout.padding)
+        .allowsHitTesting(false)
     }
 
-    private func videoColumn(item: ExternalWallItem, layout: ExternalWallLayout) -> some View {
-        VStack(spacing: layout.scaled(20)) {
-            VStack(spacing: layout.scaled(9)) {
-                Text(item.eventName.isEmpty ? "360 环拍精彩回放" : item.eventName)
-                    .font(.system(size: layout.scaled(38), weight: .semibold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.65)
-                    .multilineTextAlignment(.center)
-                Text("精彩回放 · \(item.createdAt.formatted(date: .omitted, time: .shortened))")
-                    .font(.system(size: layout.scaled(23)))
-                    .foregroundStyle(.white.opacity(0.65))
+    private func wallCards(size: CGSize) -> some View {
+        let placements = ExternalWallLayout.placements(
+            size: size, count: controller.items.count,
+            activeIndex: activeIndex, mode: controller.layoutMode
+        )
+        let cards = placements.compactMap { placement -> ExternalWallPositionedItem? in
+            guard controller.items.indices.contains(placement.index) else { return nil }
+            return ExternalWallPositionedItem(item: controller.items[placement.index],
+                                              videoFrame: placement.videoFrame, qrFrame: placement.qrFrame)
+        }
+        return ZStack(alignment: .topLeading) {
+            ForEach(cards) { card in
+                videoCard(item: card.item, frame: card.videoFrame, size: size)
+                qrCard(item: card.item, frame: card.qrFrame)
             }
-            .frame(height: layout.scaled(100))
+            if controller.layoutMode == .cinema, let placement = placements.first {
+                cinemaCounter(size: size, qrFrame: placement.qrFrame)
+                cinemaProgressBar(size: size)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
 
-            ExternalWallPlayerLayerView(player: controller.player, isReady: $isVideoReady)
-                // Do not retain the previous video's last frame next to a new QR.
+    private func videoCard(item: ExternalWallItem, frame: CGRect, size: CGSize) -> some View {
+        let scale = max(0.1, min(size.width / 1920, size.height / 1080))
+        let cornerRadius = controller.layoutMode == .cinema ? 6 * scale : 3 * scale
+        return Group {
+            if item.id == controller.currentItem?.id {
+                ExternalWallActiveVideo(
+                    player: controller.player, poster: controller.posterImages[item.id],
+                    isPlaybackHeld: controller.isPlaybackHeld, scale: scale
+                )
+                // A new identity cannot retain the previous player's last frame or readiness.
                 .id(item.id)
-                .background(.black)
-                .overlay {
-                    if !isVideoReady {
-                        VStack(spacing: layout.scaled(18)) {
-                            ProgressView().tint(.white)
-                                .scaleEffect(max(1, layout.scale))
-                            Text("正在准备视频…")
-                                .font(.system(size: layout.scaled(26)))
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                }
-                .overlay(alignment: .bottom) {
-                    if controller.isPlaybackHeld {
-                        Label("播放暂时暂停", systemImage: "pause.fill")
-                            .font(.system(size: layout.scaled(23), weight: .medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, layout.scaled(22))
-                            .padding(.vertical, layout.scaled(12))
-                            .background(.black.opacity(0.8), in: Capsule())
-                            .padding(.bottom, layout.scaled(20))
-                    }
-                }
-                .accessibilityLabel("当前环拍视频")
-        }
-    }
-
-    private func downloadColumn(item: ExternalWallItem, layout: ExternalWallLayout) -> some View {
-        VStack(spacing: layout.scaled(24)) {
-            Spacer(minLength: 0)
-            Text("扫码下载视频")
-                .font(.system(size: layout.scaled(48), weight: .bold))
-                .foregroundStyle(.white)
-            Text("把这一刻带走")
-                .font(.system(size: layout.scaled(27)))
-                .foregroundStyle(.white.opacity(0.7))
-
-            qrCard(item: item, layout: layout)
-
-            Text(item.qrPayload == nil ? "成片正在准备下载链接" : "打开微信扫一扫，保存到相册")
-                .font(.system(size: layout.scaled(27), weight: .medium))
-                .foregroundStyle(.white.opacity(0.85))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-
-            Text(controller.statusText)
-                .font(.system(size: layout.scaled(22)))
-                .foregroundStyle(.white.opacity(0.55))
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .padding(.top, layout.scaled(10))
-            Spacer(minLength: 0)
-        }
-    }
-
-    @ViewBuilder
-    private func qrCard(item: ExternalWallItem, layout: ExternalWallLayout) -> some View {
-        if item.qrPayload != nil, let image = controller.qrImage {
-            Image(uiImage: image)
-                .interpolation(.none)
-                .resizable()
-                .scaledToFit()
-                .frame(width: layout.qrSize, height: layout.qrSize)
-                .padding(layout.qrQuietZone)
-                .background(.white, in: RoundedRectangle(cornerRadius: layout.scaled(20)))
-                .accessibilityLabel("当前视频下载二维码")
-        } else {
-            VStack(spacing: layout.scaled(22)) {
-                Image(systemName: "qrcode")
-                    .font(.system(size: layout.scaled(90)))
-                    .foregroundStyle(.white.opacity(0.35))
-                Text(item.qrPayload == nil ? "上传完成后可扫码下载" : "正在准备下载二维码")
-                    .font(.system(size: layout.scaled(27), weight: .medium))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .multilineTextAlignment(.center)
+            } else {
+                ExternalWallPoster(image: controller.posterImages[item.id], scale: scale)
             }
-            .frame(width: layout.qrSize, height: layout.qrSize)
-            .padding(layout.qrQuietZone)
-            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: layout.scaled(20)))
         }
+        .frame(width: frame.width, height: frame.height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .shadow(color: .black.opacity(0.5), radius: 17 * scale, x: 0, y: 14 * scale)
+        .position(x: frame.midX, y: frame.midY)
+        .accessibilityLabel("环拍视频")
     }
 
-    private func placeholder(title: String, detail: String, symbol: String, layout: ExternalWallLayout) -> some View {
-        VStack(spacing: layout.scaled(28)) {
-            Image(systemName: symbol)
-                .font(.system(size: layout.scaled(96), weight: .light))
-                .foregroundStyle(.white.opacity(0.4))
+    private func qrCard(item: ExternalWallItem, frame: CGRect) -> some View {
+        let currentImage = item.id == controller.currentItem?.id ? controller.qrImage : nil
+        let image = item.qrPayload == nil ? nil : (controller.qrImages[item.id] ?? currentImage)
+        return ExternalWallQRCard(image: image, isUploaded: item.qrPayload != nil, side: frame.width)
+            .frame(width: frame.width, height: frame.height)
+            .position(x: frame.midX, y: frame.midY)
+    }
+
+    private func cinemaCounter(size: CGSize, qrFrame: CGRect) -> some View {
+        let scale = max(0.1, min(size.width / 1920, size.height / 1080))
+        return Text(String(format: "%02d / %02d", activeIndex + 1, controller.items.count))
+            .font(.system(size: 20 * scale, weight: .bold, design: .monospaced))
+            .tracking(2)
+            .foregroundStyle(Color(red: 154 / 255, green: 166 / 255, blue: 178 / 255))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(.leading, max(0, size.width - qrFrame.maxX))
+            .padding(.bottom, max(0, size.height - qrFrame.maxY))
+    }
+
+    private func cinemaProgressBar(size: CGSize) -> some View {
+        let height = 4 * max(0.1, min(size.width / 1920, size.height / 1080))
+        let progress = CGFloat(min(1, max(0, controller.cinemaProgress)))
+        return Color.white.opacity(0.65)
+            .frame(width: size.width * progress, height: height)
+            .frame(width: size.width, height: height, alignment: .leading)
+            .background(.white.opacity(0.08))
+            .position(x: size.width / 2, y: size.height - height / 2)
+            .accessibilityHidden(true)
+    }
+
+    private func waitingView(title: String, detail: String, size: CGSize) -> some View {
+        VStack(spacing: max(8, size.height * 0.014)) {
+            Image(systemName: "video.fill")
+                .font(.system(size: min(120, max(44, size.width * 0.07))))
+                .foregroundStyle(.white.opacity(0.8))
             Text(title)
-                .font(.system(size: layout.scaled(46), weight: .semibold))
+                .font(.system(size: min(58, max(26, size.width * 0.034)), weight: .heavy))
+                .foregroundStyle(.white.opacity(0.94))
             Text(detail)
-                .font(.system(size: layout.scaled(28)))
-                .foregroundStyle(.white.opacity(0.7))
-                .multilineTextAlignment(.center)
+                .font(.system(size: min(26, max(14, size.width * 0.015)), weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
             Text(controller.statusText)
-                .font(.system(size: layout.scaled(23)))
-                .foregroundStyle(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
+                .font(.system(size: min(20, max(12, size.width * 0.011))))
+                .foregroundStyle(.white.opacity(0.4))
         }
-        .foregroundStyle(.white)
-        .padding(layout.scaled(96))
+        .multilineTextAlignment(.center)
+        .padding(30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-private struct ExternalWallLayout {
+private struct ExternalWallPositionedItem: Identifiable {
+    let item: ExternalWallItem
+    let videoFrame: CGRect
+    let qrFrame: CGRect
+    var id: UUID { item.id }
+}
+
+private struct ExternalWallPoster: View {
+    let image: UIImage?
     let scale: CGFloat
 
-    init(size: CGSize) {
-        scale = max(0.01, min(size.width / 1920, size.height / 1080))
+    var body: some View {
+        ZStack {
+            Color(red: 11 / 255, green: 14 / 255, blue: 19 / 255)
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: "video")
+                    .font(.system(size: max(16, 36 * scale), weight: .light))
+                    .foregroundStyle(.white.opacity(0.18))
+            }
+        }
+        .clipped()
     }
-
-    var width: CGFloat { scaled(1920) }
-    var height: CGFloat { scaled(1080) }
-    var padding: CGFloat { scaled(64) }
-    var gap: CGFloat { scaled(80) }
-    var videoColumnWidth: CGFloat { scaled(1000) }
-    var downloadColumnWidth: CGFloat { width - padding * 2 - gap - videoColumnWidth }
-    var qrSize: CGFloat { scaled(460) }
-    var qrQuietZone: CGFloat { scaled(30) }
-
-    func scaled(_ value: CGFloat) -> CGFloat { value * scale }
 }
 
-/// 只承载同一个播放器的本地画面；不提供媒体路由选择或创建额外播放器。
+/// Mounted only for the active card, with a fresh readiness state for each video ID.
+@MainActor
+private struct ExternalWallActiveVideo: View {
+    let player: AVPlayer
+    let poster: UIImage?
+    let isPlaybackHeld: Bool
+    let scale: CGFloat
+    @State private var isReady = false
+
+    var body: some View {
+        ZStack {
+            ExternalWallPoster(image: poster, scale: scale)
+            ExternalWallPlayerLayerView(player: player, isReady: $isReady)
+                .opacity(isReady ? 1 : 0)
+            if !isReady {
+                Text("载入中…")
+                    .font(.system(size: max(10, 18 * scale), weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(8 * scale)
+                    .background(.black.opacity(0.55), in: Capsule())
+            }
+            if isPlaybackHeld {
+                Image(systemName: "pause.fill")
+                    .font(.system(size: max(10, 18 * scale), weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .padding(10 * scale)
+                    .background(.black.opacity(0.55), in: Circle())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(12 * scale)
+                    .accessibilityLabel("播放暂时暂停，拍摄优先")
+            }
+        }
+    }
+}
+
+private struct ExternalWallQRCard: View {
+    let image: UIImage?
+    let isUploaded: Bool
+    let side: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: max(3, side / 16)).fill(.white)
+            if let image {
+                Image(uiImage: image)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(max(4, side * 0.085))
+            } else {
+                VStack(spacing: max(2, side * 0.04)) {
+                    Image(systemName: isUploaded ? "qrcode" : "icloud.and.arrow.up")
+                        .font(.system(size: max(10, side * 0.2)))
+                    Text(isUploaded ? "二维码\n准备中" : "上传完成后\n可扫码下载")
+                        .font(.system(size: max(7, side * 0.105)))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.6)
+                }
+                .foregroundStyle(Color(white: 0.4))
+                .padding(max(3, side * 0.04))
+            }
+        }
+        .shadow(color: .black.opacity(0.45), radius: side * 0.11, x: 0, y: side * 0.08)
+        .accessibilityLabel(image == nil ? (isUploaded ? "正在准备下载二维码" : "上传完成后可扫码下载") : "当前视频下载二维码")
+    }
+}
+
+/// Only the active video mounts this layer; it never creates another player or route.
 @MainActor
 private struct ExternalWallPlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
@@ -210,7 +250,7 @@ private struct ExternalWallPlayerLayerView: UIViewRepresentable {
         if uiView.playerLayer.player !== player {
             uiView.playerLayer.player = player
         }
-        uiView.playerLayer.videoGravity = .resizeAspect
+        uiView.playerLayer.videoGravity = .resizeAspectFill
     }
 
     func makeCoordinator() -> Coordinator {
@@ -263,13 +303,13 @@ private final class ExternalWallPlayerSurface: UIView {
         super.init(frame: frame)
         backgroundColor = .black
         isUserInteractionEnabled = false
-        playerLayer.videoGravity = .resizeAspect
+        playerLayer.videoGravity = .resizeAspectFill
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         backgroundColor = .black
         isUserInteractionEnabled = false
-        playerLayer.videoGravity = .resizeAspect
+        playerLayer.videoGravity = .resizeAspectFill
     }
 }

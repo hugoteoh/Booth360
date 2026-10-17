@@ -183,6 +183,15 @@ struct AdminSettingsView: View {
                 set: { externalWall.isEnabled = $0 }
             ))
 
+            Picker("大屏布局", selection: Binding(
+                get: { externalWall.layoutMode },
+                set: { externalWall.layoutMode = $0 }
+            )) {
+                ForEach(ExternalWallLayoutMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+
             LabeledContent("连接状态") {
                 Label(externalWall.statusText,
                       systemImage: externalWall.isConnected ? "tv.fill" : "tv")
@@ -201,7 +210,7 @@ struct AdminSettingsView: View {
         } header: {
             Text("独立电视大屏")
         } footer: {
-            Text("电视需支持 AirPlay，无需电视浏览器或电脑。每次只播放一条成片；手机高温时会暂停播放以保护拍摄。使用时请保持 Booth360 在前台。")
+            Text("电视需支持 AirPlay，无需电视浏览器或电脑。网格仅一条播放，其余显示静态画面，拍摄优先；手机高温时会暂停播放。使用时请保持 Booth360 在前台。")
         }
     }
 
