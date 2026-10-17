@@ -5,7 +5,7 @@ name: iOS Build
 
 on:
   push:
-    branches: [ main, codex/adjustable-shot-modes ]
+    branches: [ main, codex/adjustable-shot-modes, codex/independent-airplay-wall ]
   workflow_dispatch:
 
 permissions:

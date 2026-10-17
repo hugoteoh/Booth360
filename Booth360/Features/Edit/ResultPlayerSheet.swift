@@ -60,6 +60,8 @@ struct ResultPlayerSheet: View {
 
     private func startPlayback() {
         let player = AVPlayer(playerItem: presentation.playerItem)
+        player.allowsExternalPlayback = false
+        player.usesExternalPlaybackWhileExternalScreenIsActive = false
         self.player = player
         loopObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,

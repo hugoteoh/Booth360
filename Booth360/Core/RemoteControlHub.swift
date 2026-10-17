@@ -11,6 +11,8 @@ final class RemoteControlHub {
     private(set) var startRequestID = 0
     /// 嘉宾模式是否开启中。
     var guestActive = false
+    /// Countdown / recording / export: the television must not prepare another decoder.
+    var guestCaptureBusy = false
     /// 嘉宾当前阶段的可读描述（供控制台显示）。
     var guestPhaseText = "未开启"
 

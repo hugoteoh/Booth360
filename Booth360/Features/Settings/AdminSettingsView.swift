@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// 管理员设置：嘉宾模式 PIN、上传后端（Mock / 腾讯云 COS）、系统状态。
+@MainActor
 struct AdminSettingsView: View {
     let storage: FileStorageService
     let cameraEngine: CameraEngine
@@ -14,6 +15,7 @@ struct AdminSettingsView: View {
     @State private var cosConfig = COSConfig.load()
     @State private var profile = AccountStore.load()
     @State private var message: String?
+    @State private var externalWall = ExternalWallController.shared
 
     var body: some View {
         Form {
@@ -108,6 +110,8 @@ struct AdminSettingsView: View {
                 Text("活动模板保存品牌素材、拍摄模式与效果参数；成品和源片段按当前活动分开管理。转台蓝牙连接入口在拍摄页右上角（绿=已连接，红=未连接）。")
             }
 
+            externalDisplaySection
+
             Section {
                 Toggle("局域网控制（默认常开）", isOn: Binding(
                     get: { lanServer.isRunning },
@@ -169,6 +173,35 @@ struct AdminSettingsView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(message ?? "")
+        }
+    }
+
+    private var externalDisplaySection: some View {
+        Section {
+            Toggle("开启独立电视大屏", isOn: Binding(
+                get: { externalWall.isEnabled },
+                set: { externalWall.isEnabled = $0 }
+            ))
+
+            LabeledContent("连接状态") {
+                Label(externalWall.statusText,
+                      systemImage: externalWall.isConnected ? "tv.fill" : "tv")
+                    .foregroundStyle(externalWall.isConnected ? Color.green : Color.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("1. 将 iPhone 与电视连接到同一 Wi-Fi。")
+                Text("2. 打开 iPhone 控制中心，进入「屏幕镜像」并选择电视。")
+                Text("3. 返回 Booth360，电视会显示专用视频和二维码画面。")
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 4)
+        } header: {
+            Text("独立电视大屏")
+        } footer: {
+            Text("电视需支持 AirPlay，无需电视浏览器或电脑。每次只播放一条成片；手机高温时会暂停播放以保护拍摄。使用时请保持 Booth360 在前台。")
         }
     }
 

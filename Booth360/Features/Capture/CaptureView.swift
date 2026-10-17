@@ -568,6 +568,8 @@ private struct CaptureReviewSheet: View {
         }
         .onAppear {
             let player = AVPlayer(playerItem: review.playerItem)
+            player.allowsExternalPlayback = false
+            player.usesExternalPlaybackWhileExternalScreenIsActive = false
             self.player = player
             loopObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime,

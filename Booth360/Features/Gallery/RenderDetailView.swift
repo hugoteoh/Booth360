@@ -40,6 +40,8 @@ struct RenderDetailView: View {
                     .onAppear {
                         guard fileExists else { return }
                         let player = AVPlayer(url: fileURL)
+                        player.allowsExternalPlayback = false
+                        player.usesExternalPlaybackWhileExternalScreenIsActive = false
                         self.player = player
                         player.play()
                     }

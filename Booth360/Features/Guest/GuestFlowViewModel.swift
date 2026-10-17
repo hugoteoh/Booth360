@@ -83,11 +83,16 @@ final class GuestFlowViewModel {
         turntable?.sendStop()
         cleanupResult()
         hub?.guestActive = false
+        hub?.guestCaptureBusy = false
         hub?.guestPhaseText = "未开启"
     }
 
     /// 阶段变化时同步 Motion Trigger 与远程状态。
     private func phaseDidChange() {
+        switch phase {
+        case .countingDown, .recording, .processing: hub?.guestCaptureBusy = true
+        default: hub?.guestCaptureBusy = false
+        }
         hub?.guestPhaseText = Self.phaseText(phase)
         if phase == .welcome, event.motionTriggerEnabled {
             motionTrigger.start()
@@ -285,6 +290,8 @@ final class GuestFlowViewModel {
 
     private func startResultPlayback(url: URL) {
         let player = AVPlayer(url: url)
+        player.allowsExternalPlayback = false
+        player.usesExternalPlaybackWhileExternalScreenIsActive = false
         resultPlayer = player
         loopObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,

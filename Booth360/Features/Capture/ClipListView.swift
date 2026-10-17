@@ -153,6 +153,8 @@ private struct VideoPlayerSheet: View {
             .ignoresSafeArea()
             .onAppear {
                 let player = AVPlayer(url: url)
+                player.allowsExternalPlayback = false
+                player.usesExternalPlaybackWhileExternalScreenIsActive = false
                 self.player = player
                 player.play()
             }

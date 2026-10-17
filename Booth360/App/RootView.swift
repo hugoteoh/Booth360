@@ -45,6 +45,11 @@ struct RootView: View {
             systemMonitor.start()
             uploadQueue.resumePendingOnLaunch()
             wireLANServer()
+            ExternalWallController.shared.configure(
+                storage: storage, modelContext: modelContext,
+                isCaptureBusy: {
+                    viewModel.isBusy || remoteHub.guestCaptureBusy || viewModel.engine.status == .recording
+                })
             // 拍摄亭现场：屏幕常亮，防止自动锁屏挂起 App（顺带断掉局域网服务器）
             UIApplication.shared.isIdleTimerDisabled = true
             // 局域网控制默认常开：启动即拉起，无需每次手动打开
@@ -54,9 +59,16 @@ struct RootView: View {
         }
         // 回到前台时若服务器被系统挂起断掉，自动恢复
         .onChange(of: scenePhase) { _, phase in
+            ExternalWallController.shared.setMainSceneActive(phase == .active)
             if phase == .active, LANControlServer.autoStartEnabled, !lanServer.isRunning {
                 lanServer.start()
             }
+        }
+        .onChange(of: viewModel.isBusy) { _, _ in
+            ExternalWallController.shared.enforceCapturePriority()
+        }
+        .onChange(of: remoteHub.guestCaptureBusy) { _, _ in
+            ExternalWallController.shared.enforceCapturePriority()
         }
     }
 

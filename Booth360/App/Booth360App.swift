@@ -3,6 +3,7 @@ import SwiftData
 
 @main
 struct Booth360App: App {
+    @UIApplicationDelegateAdaptor(Booth360AppDelegate.self) private var appDelegate
     private let storage: FileStorageService
     private let container: ModelContainer
     @State private var captureViewModel: CaptureViewModel
