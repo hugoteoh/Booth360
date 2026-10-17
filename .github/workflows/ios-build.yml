@@ -117,6 +117,23 @@ jobs:
             done
           fi
 
+      - name: 汇总测试结果
+        if: always()
+        run: |
+          if [ -d build/TestResults.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path build/TestResults.xcresult --format json > build/test-summary.json || true
+            if [ -s build/test-summary.json ]; then
+              python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('build/test-summary.json').read_text())
+          print('::notice::XCTest result: total={total}, passed={passed}, failed={failed}, skipped={skipped}'.format(
+              total=result.get('totalTestCount', '?'), passed=result.get('passedTests', '?'),
+              failed=result.get('failedTests', '?'), skipped=result.get('skippedTests', '?')))
+          PY
+            fi
+          fi
+
       - name: 保留测试结果
         if: always()
         uses: actions/upload-artifact@v4
@@ -125,4 +142,5 @@ jobs:
           path: |
             build/TestResults.xcresult
             build/test-build.log
+            build/test-summary.json
           retention-days: 14

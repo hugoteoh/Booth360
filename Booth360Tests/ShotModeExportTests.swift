@@ -108,28 +108,62 @@ final class ShotModeExportTests: XCTestCase {
         let directory = try workspace()
         let video = directory.appendingPathComponent("video.mp4")
         let audio = directory.appendingPathComponent("audio.caf")
-        try await TestVideoFixture.writeVideo(to: video, frames: 30)
-        try TestVideoFixture.writeAudio(to: audio, seconds: 0.3)
-        let videoTracks = try await AVURLAsset(url: video).loadTracks(withMediaType: .video)
-        let audioTracks = try await AVURLAsset(url: audio).loadTracks(withMediaType: .audio)
-        let originalVideo = try XCTUnwrap(videoTracks.first)
-        let originalAudio = try XCTUnwrap(audioTracks.first)
-        let videoRange = try await originalVideo.load(.timeRange)
-        let audioRange = try await originalAudio.load(.timeRange)
-        let source = AVMutableComposition()
-        let videoTrack = try XCTUnwrap(source.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
-        let audioTrack = try XCTUnwrap(source.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
-        try videoTrack.insertTimeRange(videoRange, of: originalVideo, at: .zero)
-        try audioTrack.insertTimeRange(audioRange, of: originalAudio, at: .zero)
-        let segment = TimelineSegment(source: .original, sourceStartSeconds: 0,
-                                      sourceDurationSeconds: videoRange.duration.seconds,
-                                      targetDurationSeconds: videoRange.duration.seconds)
-        let built = try await CompositionBuilder.build(inputs(source, segments: [segment], originalAudio: true), overlayImage: nil)
-        let resultAudio = try await built.composition.loadTracks(withMediaType: .audio)
-        let resultTrack = try XCTUnwrap(resultAudio.first)
-        let resultRange = try await resultTrack.load(.timeRange)
-        XCTAssertEqual(resultRange.duration.seconds, audioRange.duration.seconds, accuracy: 0.01)
-        XCTAssertEqual(built.totalDuration.seconds, videoRange.duration.seconds, accuracy: 0.002)
+        let combined = directory.appendingPathComponent("video-with-short-audio.mov")
+        var step = "生成视频样片"
+        do {
+            try await TestVideoFixture.writeVideo(to: video, frames: 30)
+            step = "生成短 PCM 音轨"
+            try TestVideoFixture.writeAudio(to: audio, seconds: 0.3)
+            // 保持叶子 asset 存活到文件落盘，避免测试依赖临时对象/嵌套内存 composition。
+            let videoAsset = AVURLAsset(url: video)
+            let audioAsset = AVURLAsset(url: audio)
+            step = "读取样片轨道"
+            let videoTracks = try await videoAsset.loadTracks(withMediaType: .video)
+            let audioTracks = try await audioAsset.loadTracks(withMediaType: .audio)
+            let originalVideo = try XCTUnwrap(videoTracks.first)
+            let originalAudio = try XCTUnwrap(audioTracks.first)
+            let videoRange = try await originalVideo.load(.timeRange)
+            let audioRange = try await originalAudio.load(.timeRange)
+            let source = AVMutableComposition()
+            let videoTrack = try XCTUnwrap(source.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
+            let audioTrack = try XCTUnwrap(source.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
+            step = "插入原视频"
+            try videoTrack.insertTimeRange(videoRange, of: originalVideo, at: .zero)
+            step = "插入短音轨"
+            try audioTrack.insertTimeRange(audioRange, of: originalAudio, at: .zero)
+            step = "Passthrough 写入真实 MOV 源片"
+            try await TestVideoFixture.materialize(source, to: combined)
+            withExtendedLifetime((videoAsset, audioAsset)) {}
+
+            step = "读取真实 MOV 轨道范围"
+            let realSource = AVURLAsset(url: combined)
+            let realVideoTracks = try await realSource.loadTracks(withMediaType: .video)
+            let realAudioTracks = try await realSource.loadTracks(withMediaType: .audio)
+            let realVideo = try XCTUnwrap(realVideoTracks.first)
+            let realAudio = try XCTUnwrap(realAudioTracks.first)
+            let realVideoRange = try await realVideo.load(.timeRange)
+            let realAudioRange = try await realAudio.load(.timeRange)
+            XCTAssertGreaterThan(realAudioRange.duration.seconds, 0, "样片必须包含真实音频")
+            XCTAssertEqual(realAudioRange.duration.seconds, audioRange.duration.seconds, accuracy: 0.01)
+            XCTAssertLessThan(realAudioRange.duration.seconds, realVideoRange.duration.seconds - 0.2,
+                              "不能把短音轨补齐到整段视频来绕过交集验证")
+            let segment = TimelineSegment(source: .original, sourceStartSeconds: 0,
+                                          sourceDurationSeconds: realVideoRange.duration.seconds,
+                                          targetDurationSeconds: realVideoRange.duration.seconds)
+            step = "CompositionBuilder 处理真实 MOV 和短原声"
+            let built = try await CompositionBuilder.build(inputs(realSource, segments: [segment], originalAudio: true), overlayImage: nil)
+            step = "读取并核对合成后的原声音轨"
+            let resultAudio = try await built.composition.loadTracks(withMediaType: .audio)
+            let resultTrack = try XCTUnwrap(resultAudio.first)
+            let resultRange = try await resultTrack.load(.timeRange)
+            XCTAssertEqual(resultRange.duration.seconds, realAudioRange.duration.seconds, accuracy: 0.01)
+            XCTAssertEqual(built.totalDuration.seconds, realVideoRange.duration.seconds, accuracy: 0.002)
+        } catch {
+            let nsError = error as NSError
+            let underlying = (nsError.userInfo[NSUnderlyingErrorKey] as? NSError)
+                .map { "；底层 \($0.domain) (\($0.code)): \($0.localizedDescription)" } ?? ""
+            throw TestVideoFixture.fixtureError("短原声测试阶段「\(step)」：\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)\(underlying)")
+        }
     }
 
     func testPreparationIsExclusiveAndCancellationReleasesEngine() async throws {
@@ -174,6 +208,8 @@ final class ShotModeExportTests: XCTestCase {
         settings.overlayEnabled = false
         settings.overlayVideoEnabled = false
         settings.musicEnabled = false
+        settings.beautyEnabled = false
+        settings.filterPreset = .none
         settings.introEnabled = false
         settings.outroEnabled = false
         return settings
@@ -289,6 +325,21 @@ private enum TestVideoFixture {
             session.exportAsynchronously { continuation.resume() }
         }
         guard session.status == .completed else { throw session.error ?? fixtureError("测试导出未完成") }
+    }
+
+    /// 用物理容器保存 H.264 + 短 PCM 轨，后续输入与相机的 AVURLAsset 一致。
+    static func materialize(_ asset: AVAsset, to url: URL) async throws {
+        let compatible = await AVAssetExportSession.compatibility(
+            ofExportPreset: AVAssetExportPresetPassthrough, with: asset, outputFileType: .mov)
+        guard compatible else { throw fixtureError("H.264 + 短 PCM 样片不支持 Passthrough MOV") }
+        let session = try XCTUnwrap(AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough))
+        guard session.supportedFileTypes.contains(.mov) else { throw fixtureError("测试导出器不支持 MOV 容器") }
+        session.outputURL = url
+        session.outputFileType = .mov
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            session.exportAsynchronously { continuation.resume() }
+        }
+        guard session.status == .completed else { throw session.error ?? fixtureError("真实短音轨 MOV 源片未写入完成") }
     }
 
     static func color(of image: CGImage) throws -> [Int] {
