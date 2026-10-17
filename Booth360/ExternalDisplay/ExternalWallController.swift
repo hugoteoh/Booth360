@@ -38,6 +38,7 @@ final class ExternalWallController {
     @ObservationIgnored private var itemEnded = false
     @ObservationIgnored private var qrPayload: String?
     @ObservationIgnored private var failedIDs = Set<UUID>()
+    @ObservationIgnored private var playlistEventID: UUID?
 
     init(defaults: UserDefaults = .standard) {
         preferences = defaults
@@ -183,10 +184,20 @@ final class ExternalWallController {
     private func refreshPlaylist() {
         guard canRun, let storage, let modelContext else { return }
         enforceCapturePriority()
-        // Query small metadata only. No thumbnail generation, media loading or
-        // new decoder preparation on this path while a capture is in flight.
+        let activeID = EventManager.activeEventID
+        if playlistEventID != activeID {
+            clearPlayback()
+            playlist = []
+            failedIDs = []
+            playlistEventID = activeID
+            wantsLatest = true
+            enforceCapturePriority()
+        }
+        // During capture/export, even database and file existence scans wait.
+        // The already loaded video can keep playing without a new decoder.
+        guard !isCaptureBusy, !isPlaybackHeld else { return }
         let predicate: Predicate<RenderedVideo>
-        if let activeID = EventManager.activeEventID {
+        if let activeID {
             predicate = #Predicate { !$0.hiddenFromWall && $0.eventID == activeID }
         } else {
             predicate = #Predicate { !$0.hiddenFromWall }
