@@ -52,6 +52,12 @@ enum WallPageTemplate {
                  margin-bottom:4px;flex:none;box-shadow:0 8px 22px rgba(0,0,0,.45)}
           .qrbox img{width:100%;height:100%;image-rendering:pixelated;display:block}
           .qrbox .pending{font-size:10px;color:#666;text-align:center;line-height:1.6}
+          .qr-content{position:relative;display:block;width:100%;height:100%}
+          .qr-content img{position:absolute;inset:0;visibility:hidden}
+          .qr-content .qr-status{position:absolute;inset:0;display:flex;align-items:center;
+                justify-content:center;flex-direction:column}
+          .qr-content[data-qr-state=loaded] img{visibility:visible}
+          .qr-content[data-qr-state=loaded] .qr-status{display:none}
           @keyframes wallIn{from{opacity:0;transform:translateY(26px) scale(.96)}
                             to{opacity:1;transform:none}}
           @keyframes wallGlow{0%,100%{filter:brightness(.95)}50%{filter:brightness(1.06)}}
@@ -223,7 +229,7 @@ enum WallPageTemplate {
         }
 
         let items = [];
-        let sig = "";           // id+qr 指纹：没变就不动 DOM（视频不重启）
+        let sig = "";           // 视频身份/路径指纹；二维码另行同步，不重启视频
         let cineIdx = 0;
         let cineTimer = null;
 
@@ -386,11 +392,107 @@ enum WallPageTemplate {
         }
 
         // —— 渲染 ——
-        function qrHTML(item) {
-          return item.qrURL
-            ? `<img src="${item.qrURL}" alt="QR">`
-            : `<div class="pending">☁️<br>${item.state || "上传中"}</div>`;
+        function qrEscape(value) {
+          return String(value || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;")
+            .replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&#39;");
         }
+        function qrHTML(item) {
+          const src = qrEscape(item.qrURL);
+          const status = src ? "二维码加载中" : `☁️<br>${qrEscape(item.state || "上传中")}`;
+          return `<span class="qr-content" data-qr-id="${qrEscape(item.id)}" data-qr-source="${src}">
+            <span class="qr-status pending">${status}</span>
+            ${src ? `<img data-qr-image src="${src}" alt="二维码">` : ""}</span>`;
+        }
+
+        // 清单可能先于 qr.png 就绪，首次 404/断网都不能永久留下白框。
+        // 状态按实际 img 生命周期保存；只修二维码，不重建或换源 video。
+        const qrRequests = new WeakMap();
+        const QR_LOAD_TIMEOUT_MS = 15000;
+        const QR_RETRY_MAX_MS = 30000;
+        let qrRetrySerial = 0;
+
+        function qrRequest(img) {
+          let request = qrRequests.get(img);
+          if (!request) {
+            request = { phase: "loading", failures: 0, startedAt: Date.now(), nextAt: 0 };
+            qrRequests.set(img, request);
+          }
+          return request;
+        }
+        function currentQRRoot(img) {
+          if (!img || !img.isConnected || !stage.contains(img)) return null;
+          return img.closest(".qr-content");
+        }
+        function qrLoaded(img) {
+          const root = currentQRRoot(img);
+          if (!root || !img.naturalWidth) return;
+          const request = qrRequest(img);
+          if (request.phase === "loaded" && root.dataset.qrState === "loaded") return;
+          request.phase = "loaded";
+          request.failures = 0;
+          request.nextAt = 0;
+          root.dataset.qrState = "loaded";
+        }
+        function qrFailed(img) {
+          const root = currentQRRoot(img);
+          if (!root) return;
+          const request = qrRequest(img);
+          if (request.phase === "error") return; // 巡检不可不断延后重试时间
+          request.phase = "error";
+          request.nextAt = Date.now() + Math.min(QR_RETRY_MAX_MS,
+            1000 * Math.pow(2, Math.min(request.failures++, 5)));
+          root.dataset.qrState = "error";
+          const status = root.querySelector(".qr-status");
+          if (status) status.textContent = "二维码重试中";
+        }
+        function qrRetryURL(source) {
+          try {
+            const url = new URL(source, location.href);
+            // 现有云端与 LAN 二维码均是公开地址。不要破坏未来的签名 URL。
+            if (url.searchParams.has("q-signature") || url.searchParams.has("X-Amz-Signature")) return source;
+            url.searchParams.set("__booth360_qr_retry", `${Date.now()}-${++qrRetrySerial}`);
+            return url.href;
+          } catch (e) { return source; }
+        }
+        function syncQRCodes() {
+          // URL/上传状态变化只更新该二维码，视频身份与播放进度保持不动。
+          for (const root of stage.querySelectorAll(".qr-content")) {
+            const item = items.find(x => String(x.id) === root.dataset.qrId);
+            if (!item) continue;
+            const source = String(item.qrURL || "");
+            if (source !== root.dataset.qrSource) root.parentElement.innerHTML = qrHTML(item);
+          }
+          const now = Date.now();
+          for (const img of stage.querySelectorAll("img[data-qr-image]")) {
+            const root = currentQRRoot(img);
+            if (!root) continue;
+            const request = qrRequest(img);
+            if (img.complete && img.naturalWidth > 0) { qrLoaded(img); continue; }
+            if (request.phase === "loaded") continue;
+            if (request.phase === "loading" &&
+                (img.complete || now - request.startedAt >= QR_LOAD_TIMEOUT_MS)) qrFailed(img);
+            if (request.phase !== "error" || now < request.nextAt) continue;
+            request.phase = "loading";
+            request.startedAt = now;
+            root.dataset.qrState = "loading";
+            img.src = qrRetryURL(root.dataset.qrSource);
+          }
+        }
+        // 图片 load/error 不冒泡，使用捕获也能接住动态插入图片的首次失败。
+        stage.addEventListener("load", event => {
+          if (event.target.matches && event.target.matches("img[data-qr-image]")) qrLoaded(event.target);
+        }, true);
+        stage.addEventListener("error", event => {
+          if (event.target.matches && event.target.matches("img[data-qr-image]")) qrFailed(event.target);
+        }, true);
+        setInterval(syncQRCodes, 1000);
+        window.addEventListener("online", () => {
+          for (const img of stage.querySelectorAll("img[data-qr-image]")) {
+            const request = qrRequests.get(img);
+            if (request && request.phase === "error") request.nextAt = 0;
+          }
+          syncQRCodes();
+        });
         function cardHTML(item, i, play = true) {
           // play=false：只显示首帧不播放（#t=0.1 让浏览器 seek 到首帧），下排小卡用
           const video = play
@@ -406,7 +508,7 @@ enum WallPageTemplate {
         }
 
         // —— 网格：增量更新（已有视频不重建、新卡错峰加载，避免 8 路同时解码的卡顿） ——
-        const gridKnown = new Map(); // id -> { el, hasQR, playing }
+        const gridKnown = new Map(); // id -> { el, playing }
 
         function gridCardEl(item, i) {
           const el = document.createElement("div");
@@ -467,15 +569,7 @@ enum WallPageTemplate {
           for (const item of fresh.slice().reverse()) {
             const el = gridCardEl(item, gridKnown.size);
             stage.prepend(el);
-            gridKnown.set(item.id, { el, hasQR: !!item.qrURL, playing: null });
-          }
-          // 上传完成 → 二维码原位浮现
-          for (const item of items) {
-            const entry = gridKnown.get(item.id);
-            if (entry && !entry.hasQR && item.qrURL) {
-              entry.el.querySelector(".qrbox").innerHTML = qrHTML(item);
-              entry.hasQR = true;
-            }
+            gridKnown.set(item.id, { el, playing: null });
           }
           // 播放策略：流畅模式只播最新 4 条；需要变更的卡按 300ms 错峰执行
           const limit = smooth ? 4 : Infinity;
@@ -485,7 +579,8 @@ enum WallPageTemplate {
             if (!entry) return;
             const shouldPlay = idx < limit;
             const loaded = !!entry.el.querySelector("video").getAttribute("src");
-            if (!loaded || entry.playing !== shouldPlay) {
+            if (!loaded || entry.playing !== shouldPlay ||
+                !samePath(entry.el.querySelector("video").getAttribute("src"), item.videoURL)) {
               setCardPlayback(entry, item, shouldPlay, stagger);
               stagger += 300;
             }
@@ -500,6 +595,7 @@ enum WallPageTemplate {
 
           if (mode === "grid") {
             gridSync();
+            syncQRCodes();
             return; // 播放由 gridSync 的错峰逻辑负责，不走 nudgePlay
 
           } else if (mode === "featured") {
@@ -532,6 +628,7 @@ enum WallPageTemplate {
               renderCine();
             }, CINE_MS);
           }
+          syncQRCodes();
           nudgePlay();
         }
 
@@ -560,6 +657,7 @@ enum WallPageTemplate {
           } else {
             cineBar.style.display = "none";
           }
+          syncQRCodes();
           nudgePlay();
         }
 
@@ -568,9 +666,10 @@ enum WallPageTemplate {
           try {
             items = (await fetchItems()).slice(0, MAX_CARDS);
             document.getElementById("wait").style.display = items.length ? "none" : "flex";
-            const s = items.map(x => x.id + "|" + (x.qrURL ? 1 : 0)).join(",");
+            const s = JSON.stringify(items.map(x => [x.id, String(x.videoURL || "").split(/[?#]/)[0]]));
             if (s !== sig) { sig = s; cineIdx = 0; render(); }
           } catch (e) { /* 网络抖动，下轮再试 */ }
+          finally { syncQRCodes(); }
         }
         refresh();
         setInterval(refresh, REFRESH_MS);

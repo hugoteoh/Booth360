@@ -5,16 +5,40 @@ name: iOS Build
 
 on:
   push:
-    branches: [ main, codex/adjustable-shot-modes, codex/independent-airplay-wall ]
+    branches: [ main, codex/adjustable-shot-modes, codex/independent-airplay-wall, codex/wall-qr-recovery ]
   workflow_dispatch:
 
 permissions:
   contents: write   # 允许把 ipa 发布到 Releases
 
 jobs:
+  web-wall-tests:
+    name: 网页大屏回归（Chromium）
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web-tests/package-lock.json
+      - name: 安装测试依赖
+        run: npm ci --prefix web-tests
+      - name: 准备浏览器及合成测试视频工具
+        working-directory: web-tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          npx playwright install --with-deps chromium
+      - name: 验证二维码恢复且视频不中断
+        run: npm test --prefix web-tests
+
   build-ipa:
     name: 编译 IPA（未签名）
-    needs: unit-tests
+    needs: [unit-tests, web-wall-tests]
     runs-on: macos-15
     timeout-minutes: 30
     steps:
