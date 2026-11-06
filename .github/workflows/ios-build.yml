@@ -29,10 +29,21 @@ jobs:
         run: npm ci --prefix web-tests
       - name: 准备浏览器及合成测试视频工具
         working-directory: web-tests
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          npx playwright install --with-deps chromium
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
+          fi
+          if command -v google-chrome >/dev/null 2>&1; then
+            echo "BOOTH360_CHROME_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+            google-chrome --version
+          elif command -v google-chrome-stable >/dev/null 2>&1; then
+            echo "BOOTH360_CHROME_PATH=$(command -v google-chrome-stable)" >> "$GITHUB_ENV"
+            google-chrome-stable --version
+          else
+            npx playwright install --with-deps chromium
+          fi
       - name: 验证二维码恢复且视频不中断
         run: npm test --prefix web-tests
 
