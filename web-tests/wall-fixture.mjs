@@ -74,27 +74,40 @@ export function item(id = 'clip-a', qrURL = '/qr-a.svg', videoURL = '/video.mp4?
   return { id, qrURL, videoURL, state: qrURL ? '已上传' : '上传中' };
 }
 
-export async function openWall(t, runtime, { mode = 'grid', items = [item()], rules = {}, dropFirstImageError = false } = {}) {
+export async function openWall(t, runtime, {
+  mode = 'grid', items = [item()], rules = {}, dropFirstImageError = false,
+  cloud = false, pagePath = '/', clipboard,
+} = {}) {
   const state = {
     items, manifestFails: false, manifestRequests: 0, failedManifestRequests: 0,
     qrRequests: [], videoRequests: [], rules: new Map(Object.entries(rules)),
   };
-  const html = template.renderWallHTML(fixtureJS);
+  const html = template.renderWallHTML(cloud ? template.cloudVariantJS() : fixtureJS);
+  const wallPath = new URL(pagePath, 'http://127.0.0.1').pathname;
+  const recoveryPath = new URL('./qr-recovery.html', `http://127.0.0.1${wallPath}`).pathname;
+  const folder = wallPath.split('/').filter(Boolean).at(-2);
   const server = createServer((request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     response.setHeader('Cache-Control', 'no-store');
-    if (url.pathname === '/') {
+    if (url.pathname === wallPath) {
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       response.end(html);
-    } else if (url.pathname === '/items') {
+    } else if (url.pathname === '/items' || (cloud && url.pathname.endsWith('/wall.json'))) {
       state.manifestRequests++;
       if (state.manifestFails) {
         state.failedManifestRequests++;
         response.writeHead(503).end('Temporarily unavailable');
       } else {
         response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify(state.items));
+        response.end(JSON.stringify(cloud ? { items: state.items.map(entry => ({
+          id: entry.id, url: entry.videoURL, qr: entry.qrURL,
+        })) } : state.items));
       }
+    } else if (cloud && url.pathname.endsWith('/current.json')) {
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ event: folder }));
+    } else if (cloud && url.pathname === recoveryPath) {
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        .end('<!doctype html><title>Fixture recovery page</title><p>Local recovery destination</p>');
     } else if (url.pathname.startsWith('/qr-')) {
       const rule = state.rules.get(url.pathname) || {};
       const failures = rule.failures || 0;
@@ -141,8 +154,19 @@ export async function openWall(t, runtime, { mode = 'grid', items = [item()], ru
     if (new URL(route.request().url()).origin === origin) return route.continue();
     return route.abort('blockedbyclient');
   });
-  await page.addInitScript(({ mode, dropFirstImageError }) => {
+  await page.addInitScript(({ mode, dropFirstImageError, clipboard }) => {
     localStorage.setItem('booth360.wall.mode', mode);
+    if (clipboard) {
+      window.__copiedRecoveryURLs = [];
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard === 'missing' ? undefined : {
+        writeText(value) {
+          window.__copiedRecoveryURLs.push(value);
+          if (clipboard === 'rejected') return Promise.reject(new DOMException('Clipboard denied', 'NotAllowedError'));
+          if (clipboard === 'deferred') return new Promise(resolve => { window.__finishRecoveryCopy = resolve; });
+          return Promise.resolve();
+        },
+      } });
+    }
     if (dropFirstImageError) document.addEventListener('error', event => {
       if (!window.__imageErrorDropped && event.target instanceof HTMLImageElement &&
           event.target.hasAttribute('data-qr-image')) {
@@ -150,8 +174,8 @@ export async function openWall(t, runtime, { mode = 'grid', items = [item()], ru
         event.stopImmediatePropagation();
       }
     }, true);
-  }, { mode, dropFirstImageError });
-  await page.goto(origin, { waitUntil: 'domcontentloaded' });
+  }, { mode, dropFirstImageError, clipboard });
+  await page.goto(new URL(pagePath, origin).href, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector(`#stage.m-${mode} video`);
   return { page, state, scriptErrors };
 }

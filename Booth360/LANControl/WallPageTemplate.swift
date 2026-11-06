@@ -13,6 +13,7 @@ import Foundation
 ///   REFRESH_MS            轮询间隔
 ///   async fetchItems()    → [{id, videoURL, qrURL(可空), state}]（新→旧）
 ///   GEAR_HREF             控制台链接（空字符串 = 面板里不显示该入口）
+///   RECOVERY_HREF         可选：同活动二维码修复页，未定义时隐藏入口
 enum WallPageTemplate {
 
     static func page(variantJS: String) -> String {
@@ -115,7 +116,8 @@ enum WallPageTemplate {
                 justify-content:center;background:rgba(0,0,0,.55)}
           #panel.open{display:flex}
           .pbox{width:min(460px,92vw);background:#0d1117;border:1px solid #1d232c;
-                border-radius:16px;padding:26px 26px 22px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+                border-radius:16px;padding:26px 26px 22px;box-shadow:0 30px 80px rgba(0,0,0,.6);
+                max-height:calc(100vh - 32px);overflow-y:auto}
           .pbox h3{margin:0 0 16px;font-size:18px;letter-spacing:2px}
           .popt{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
                 background:#12161d;border:1px solid #232a34;border-radius:12px;
@@ -137,6 +139,14 @@ enum WallPageTemplate {
                 color:#f2f5f9;font:inherit;font-size:13px;padding:9px 12px;min-width:0}
           .bgimg button{background:#232a34;border:none;color:#f2f5f9;font:inherit;font-size:13px;
                 padding:9px 16px;border-radius:10px;cursor:pointer;flex:none}
+          .recovery-entry{margin-top:18px;padding-top:14px;border-top:1px solid #232a34}
+          .recovery-entry .psec{margin:0 0 8px}
+          .recovery-entry input{width:100%;background:#12161d;border:1px solid #232a34;
+                border-radius:10px;color:#a8b7c6;font:inherit;font-size:12px;padding:9px 10px}
+          .recovery-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:9px}
+          .recovery-actions a{color:#8db8ff;text-decoration:none;font-size:13px}
+          .recovery-actions button{padding:8px 12px;font-size:13px}
+          #recoveryStatus{color:#8b97a3;font-size:12px;margin-top:7px;min-height:1.4em}
           .pfoot{display:flex;justify-content:space-between;align-items:center;margin-top:14px}
           .pfoot a{color:#8b97a3;font-size:13px;text-decoration:none}
           .pfoot a:hover{color:#f2f5f9}
@@ -166,6 +176,15 @@ enum WallPageTemplate {
               <button id="bgapply">应用</button>
               <input id="bgfile" type="file" accept="image/*" style="display:none">
             </div>
+            <section id="recoveryEntry" class="recovery-entry" hidden aria-labelledby="recoveryHeading">
+              <div id="recoveryHeading" class="psec">二维码修复入口</div>
+              <input id="recoveryURL" type="text" readonly aria-label="当前活动二维码修复链接" spellcheck="false">
+              <div class="recovery-actions">
+                <a id="recoveryLink" href="#" target="_blank" rel="noopener">打开修复大屏 ↗</a>
+                <button id="copyRecovery" class="pclose" type="button">复制链接</button>
+              </div>
+              <div id="recoveryStatus" role="status" aria-live="polite">本活动使用，继续同步新拍的视频。</div>
+            </section>
             <div class="pfoot">
               <span>
                 <a id="galleryLink" href="#" target="_blank" style="display:none;margin-right:16px">视频总览 →</a>
@@ -389,6 +408,31 @@ enum WallPageTemplate {
         const galleryLink = document.getElementById("galleryLink");
         if (typeof GALLERY_HREF === "string" && GALLERY_HREF) {
           galleryLink.href = GALLERY_HREF; galleryLink.style.display = "inline";
+        }
+        if (typeof RECOVERY_HREF === "string" && RECOVERY_HREF) {
+          try {
+            const recoveryURL = new URL(RECOVERY_HREF, location.href).href;
+            const recoveryURLInput = document.getElementById("recoveryURL");
+            recoveryURLInput.value = recoveryURL;
+            document.getElementById("recoveryLink").href = recoveryURL;
+            document.getElementById("recoveryEntry").hidden = false;
+            const copyRecovery = document.getElementById("copyRecovery");
+            copyRecovery.addEventListener("click", async () => {
+              const status = document.getElementById("recoveryStatus");
+              copyRecovery.disabled = true;
+              status.textContent = "正在复制…";
+              try {
+                await navigator.clipboard.writeText(recoveryURL);
+                status.textContent = "链接已复制";
+              } catch (e) {
+                recoveryURLInput.focus();
+                recoveryURLInput.select();
+                status.textContent = "未能自动复制，链接已选中，请按 Ctrl+C 或长按复制";
+              } finally {
+                copyRecovery.disabled = false;
+              }
+            });
+          } catch (e) { /* 无有效修复链接时保留隐藏，不影响大屏播放 */ }
         }
 
         // —— 渲染 ——

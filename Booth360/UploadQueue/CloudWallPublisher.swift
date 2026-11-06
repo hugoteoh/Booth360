@@ -6,10 +6,12 @@ import UIKit
 ///   https://<bucket>.cos.<region>.myqcloud.com/booth360/wall/index.html
 ///
 /// 发布物（全部带 x-cos-acl: public-read，签名头保证生效）：
-///   booth360/wall/index.html   大屏页面（每次发布覆盖，保证最新版）
-///   booth360/wall/wall.json    节目单：最近 30 条 {id, time, url, qrURL}
-///   booth360/<renderID>/qr.png 每条视频的下载二维码（只传一次）
-/// 视频/二维码链接用 7 天预签名 GET；每次发布全部重新生成，活动期间永远新鲜。
+///   booth360/wall/index.html   跳转到当前活动的固定入口
+///   booth360/wall/<eventID>/{index.html,qr-recovery.html} 活动大屏与固定修复入口
+///   booth360/wall/<eventID>/wall.json 节目单：最近 30 条 {id, time, url, qr, page}
+///   booth360/<renderID>/qr.png 每条视频的公开二维码图片（每次发布刷新）
+/// 视频用 7 天预签名 GET；二维码图片地址公开且永久，自定义域名下编码永久落地页地址。
+/// 未配置自定义域名时，二维码内容回退为当次生成的 7 天视频签名链接。
 enum CloudWallPublisher {
 
     struct WallItem {
@@ -43,7 +45,7 @@ enum CloudWallPublisher {
         let folder = eventID?.uuidString.lowercased() ?? "default"
 
         do {
-            // 每次发布对全部条目重新签名 + 重生成二维码：链接永远新鲜（各 7 天有效期从现在起算）
+            // 视频链接重新签名为 7 天有效期；二维码与落地页在后续阶段刷新。
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
             // 顺序要点：清单/页面先行（删了的立即消失、新拍的立即上墙），
@@ -80,9 +82,17 @@ enum CloudWallPublisher {
                 config: config
             )
 
-            // 3. 页面本体（覆盖上传，永远最新版）
+            // 3. 先确保固定修复入口就绪，再更新含入口链接的大屏页面。
+            // 旧版 App 只覆盖 index.html，不会覆盖这个独立对象；两页读取同目录节目单。
+            let wallPageData = Data(CloudWallPageHTML.html.utf8)
             try await putPublicObject(
-                data: Data(CloudWallPageHTML.html.utf8),
+                data: wallPageData,
+                objectKey: "booth360/wall/\(folder)/qr-recovery.html",
+                contentType: "text/html; charset=utf-8",
+                config: config
+            )
+            try await putPublicObject(
+                data: wallPageData,
                 objectKey: "booth360/wall/\(folder)/index.html",
                 contentType: "text/html; charset=utf-8",
                 config: config
@@ -145,7 +155,7 @@ enum CloudWallPublisher {
             AppLogger.storage.info("云端大屏已发布 \(jsonItems.count) 条（总览 \(galleryJSON.count) 条，活动目录 \(folder, privacy: .public)），开始刷新单条资产")
 
             // 6. 逐条资产刷新（qr / 落地页 / 小程序 v.json）：全部是重签续期或幂等重写，
-            //    中断只影响"续期时点"，不影响节目单正确性；单条失败跳过不拖垮整体。
+            //    中断可能使新条目二维码暂不可用；单条失败跳过不拖垮整体。
             for asset in wallAssets {
                 do {
                     if let qrImage = QRCodeGenerator.image(

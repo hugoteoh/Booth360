@@ -1,12 +1,13 @@
 import Foundation
 
 /// 云端大屏（发布到 COS，任何网络可开）—— 与局域网大屏同一套 Glambot 风格模板。
-/// 数据源：同目录 wall.json（条目均已上传，二维码即刻可见）。
+/// 数据源：同目录 wall.json；二维码图片暂未就绪时，由共享模板自动重试。
 enum CloudWallPageHTML {
     static let html = WallPageTemplate.page(variantJS: """
     const REFRESH_MS = 5000;
     const GEAR_HREF = "";
     const GALLERY_HREF = "./gallery.html";
+    const RECOVERY_HREF = "./qr-recovery.html";
     async function fetchItems() {
       const response = await fetch(`./wall.json?ts=${Date.now()}`, { cache: "no-store" });
       const manifest = await response.json();

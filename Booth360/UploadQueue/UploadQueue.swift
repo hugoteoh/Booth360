@@ -219,7 +219,7 @@ final class UploadQueue {
         publishCloudWallIfNeeded()
     }
 
-    /// 删除整场活动时清理它的云端大屏/总览页面（4 个清单与页面文件，尽力而为）。
+    /// 删除整场活动时清理它的云端大屏/备用入口/总览页面（尽力而为）。
     func cleanupEventWall(eventID: UUID) {
         guard UploadMode.current == .cos else { return }
         let config = COSConfig.load()
@@ -228,6 +228,7 @@ final class UploadQueue {
         let keys = [
             "booth360/wall/\(folder)/wall.json",
             "booth360/wall/\(folder)/index.html",
+            "booth360/wall/\(folder)/qr-recovery.html",
             "booth360/wall/\(folder)/gallery.json",
             "booth360/wall/\(folder)/gallery.html",
         ]
