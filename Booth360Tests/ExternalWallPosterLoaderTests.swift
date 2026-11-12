@@ -49,6 +49,37 @@ final class ExternalWallPosterLoaderTests: XCTestCase {
         }
     }
 
+    func testGalleryAndExternalPosterSelectTheMiddleGreenPhaseInsteadOfTheFirstOrHalfwayFrame() async throws {
+        let directory = try workspace()
+        let source = directory.appendingPathComponent("temporal-colors.mp4")
+        try await writePortraitVideo(to: source, temporalColors: true)
+        let loader = ExternalWallPosterLoader()
+        defer { loader.cancel() }
+
+        // The fixture starts red, is green for frames 4...6, and turns blue
+        // at frame 7 (before the midpoint). Only the requested 37% region is green.
+        let external = try await loader.image(for: source)
+        let galleryImage = await ThumbnailLoader.shared.thumbnail(for: source)
+        let gallery = try XCTUnwrap(galleryImage)
+        for image in [external, gallery] {
+            let rgba = try sampleColor(of: XCTUnwrap(image.cgImage))
+            XCTAssertGreaterThan(rgba[1], rgba[0] + 80, "The selected poster must be in the green temporal phase")
+            XCTAssertGreaterThan(rgba[1], rgba[2] + 80, "First-frame red and midpoint blue are incorrect")
+        }
+    }
+
+    func testThumbnailTimeRemainsInsideVeryShortClipsAndInvalidDurationsFallBackToZero() {
+        for duration in [CMTime(value: 1, timescale: 6000), CMTime(value: 1, timescale: 30)] {
+            let time = VideoThumbnailTiming.time(for: duration)
+            XCTAssertTrue(time.isNumeric)
+            XCTAssertGreaterThanOrEqual(time, .zero)
+            XCTAssertLessThan(time, duration)
+        }
+        for invalid in [CMTime.invalid, .indefinite, .zero, CMTime(seconds: -1, preferredTimescale: 600)] {
+            XCTAssertEqual(VideoThumbnailTiming.time(for: invalid), .zero)
+        }
+    }
+
     private func workspace() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "Booth360PosterTests-\(UUID().uuidString)", isDirectory: true)
@@ -58,7 +89,7 @@ final class ExternalWallPosterLoaderTests: XCTestCase {
         return directory
     }
 
-    private func writePortraitVideo(to url: URL) async throws {
+    private func writePortraitVideo(to url: URL, temporalColors: Bool = false) async throws {
         // Store landscape pixels plus the camera-style 90-degree transform. The
         // displayed source is 640 x 1136, so ignoring preferredTransform fails.
         let width = 1136
@@ -103,7 +134,8 @@ final class ExternalWallPosterLoaderTests: XCTestCase {
                     }
                     try await Task.sleep(for: .milliseconds(5))
                 }
-                let buffer = try colorBuffer(width: width, height: height)
+                let phase = temporalColors ? (index < 4 ? 0 : (index < 7 ? 1 : 2)) : nil
+                let buffer = try colorBuffer(width: width, height: height, phase: phase)
                 guard adaptor.append(buffer, withPresentationTime: CMTime(value: Int64(index), timescale: 30)) else {
                     throw writer.error ?? fixtureError("Cannot append fixture frame \(index)")
                 }
@@ -120,7 +152,7 @@ final class ExternalWallPosterLoaderTests: XCTestCase {
         }
     }
 
-    private func colorBuffer(width: Int, height: Int) throws -> CVPixelBuffer {
+    private func colorBuffer(width: Int, height: Int, phase: Int? = nil) throws -> CVPixelBuffer {
         var optionalBuffer: CVPixelBuffer?
         let attributes: [String: Any] = [
             kCVPixelBufferCGImageCompatibilityKey as String: true,
@@ -138,6 +170,13 @@ final class ExternalWallPosterLoaderTests: XCTestCase {
             bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue))
+        if let phase {
+            context.setFillColor(red: phase == 0 ? 0.9 : 0.1,
+                                 green: phase == 1 ? 0.9 : 0.1,
+                                 blue: phase == 2 ? 0.9 : 0.1, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+            return buffer
+        }
         context.setFillColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
         context.setFillColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1)

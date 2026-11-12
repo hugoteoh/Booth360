@@ -217,9 +217,8 @@ enum WallPageTemplate {
         let smooth = false;
         try { smooth = localStorage.getItem("booth360.wall.smooth") === "1"; } catch (e) {}
 
-        // 静态小卡取帧位置（0~1）：360 转臂从停靠位起匀速转，录制第一帧常是背面；
-        // 默认取 50%（转到一半 ≈ 正面），各大屏可在设置面板微调（存 localStorage）。
-        let thumbFrac = 0.5;
+        // 静态小卡默认取视频 37% 位置；保留各大屏已保存的手动选择。
+        let thumbFrac = 0.37;
         try {
           const tf = parseFloat(localStorage.getItem("booth360.wall.thumb"));
           if (isFinite(tf) && tf >= 0 && tf <= 1) thumbFrac = tf;
@@ -228,7 +227,8 @@ enum WallPageTemplate {
           const apply = () => {
             if (!v.isConnected || v.autoplay) return; // 播放中的卡不动
             if (!isFinite(v.duration) || v.duration <= 0) return;
-            const tt = Math.min(v.duration - 0.05, Math.max(0.05, v.duration * thumbFrac));
+            const edge = Math.min(0.05, v.duration * 0.01);
+            const tt = Math.min(v.duration - edge, Math.max(edge, v.duration * thumbFrac));
             try { v.currentTime = tt; } catch (e) {}
           };
           if (v.readyState >= 1) apply();
@@ -375,12 +375,12 @@ enum WallPageTemplate {
           };
           box.appendChild(b);
 
-          // 静态卡画面位置滑杆：开头是背面就往中间拉（转台起点在背后时 50% ≈ 正面）
+          // 静态卡默认 37%，手动选择继续保存在本机。
           const row = document.createElement("div");
           row.className = "popt";
           row.style.cursor = "default";
           row.innerHTML = `<span class="ic">🧍</span><span style="flex:1">静态卡画面位置` +
-            `<small>下排/静态小卡显示视频第几处的画面 —— 第一帧是背面就往中间拉（一般 50% 正好正面）</small>` +
+            `<small>下排/静态小卡默认显示视频 37% 处，可按需要调整，选择保存在本机</small>` +
             `<input id="thumbRange" type="range" min="0" max="100" step="1" style="width:100%;margin-top:8px">` +
             `</span><b id="thumbPct" style="flex:none;min-width:3.4em;text-align:right"></b>`;
           box.appendChild(row);
@@ -538,7 +538,7 @@ enum WallPageTemplate {
           syncQRCodes();
         });
         function cardHTML(item, i, play = true) {
-          // play=false：只显示首帧不播放（#t=0.1 让浏览器 seek 到首帧），下排小卡用
+          // play=false：不自动播放，加载元数据后取选定位置的静态画面。
           const video = play
             ? `<video src="${item.videoURL}" autoplay muted loop playsinline preload="auto"></video>`
             : `<video src="${item.videoURL}" muted playsinline preload="metadata"></video>`;
@@ -661,7 +661,7 @@ enum WallPageTemplate {
               trim();
               setTimeout(trim, 600);
               setTimeout(trim, 2000);
-              // 静态小卡取中段帧（通常正面），位置可在设置面板调
+              // 静态小卡默认取 37% 位置，设置面板的手动选择优先。
               strip.querySelectorAll("video").forEach(seekThumb);
             }
 

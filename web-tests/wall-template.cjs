@@ -30,10 +30,25 @@ function cloudVariantJS() {
   return decodeSwiftString(multilineBody(literal));
 }
 
+function galleryVariantJS(cloud) {
+  const source = fs.readFileSync(path.resolve(__dirname, '../Booth360/LANControl/GalleryPageHTML.swift'), 'utf8');
+  const variant = source.slice(source.indexOf(`enum ${cloud ? 'Cloud' : 'LAN'}GalleryPageHTML`));
+  const literal = variant.match(/variantJS: """\r?\n([\s\S]*?)\r?\n([ \t]*)"""/);
+  return decodeSwiftString(multilineBody(literal));
+}
+
 /** Extract the production Swift multiline literal, preserving its real HTML/JS. */
 function renderWallHTML(variantJS) {
+  return renderTemplateFile(templatePath, variantJS);
+}
+
+function renderGalleryHTML(variantJS) {
+  return renderTemplateFile(path.resolve(__dirname, '../Booth360/LANControl/GalleryPageHTML.swift'), variantJS);
+}
+
+function renderTemplateFile(file, variantJS) {
   if (typeof variantJS !== 'string') throw new TypeError('variantJS must be a string');
-  const source = fs.readFileSync(templatePath, 'utf8');
+  const source = fs.readFileSync(file, 'utf8');
   const literal = source.match(/return """\r?\n([\s\S]*?)\r?\n([ \t]*)"""/);
   const body = multilineBody(literal);
   const pieces = body.split('\\(variantJS)');
@@ -41,4 +56,4 @@ function renderWallHTML(variantJS) {
   return decodeSwiftString(pieces[0]) + variantJS + decodeSwiftString(pieces[1]);
 }
 
-module.exports = { renderWallHTML, cloudVariantJS, templatePath };
+module.exports = { renderWallHTML, cloudVariantJS, renderGalleryHTML, galleryVariantJS, templatePath };

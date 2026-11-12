@@ -76,13 +76,16 @@ export function item(id = 'clip-a', qrURL = '/qr-a.svg', videoURL = '/video.mp4?
 
 export async function openWall(t, runtime, {
   mode = 'grid', items = [item()], rules = {}, dropFirstImageError = false,
-  cloud = false, pagePath = '/', clipboard,
+  cloud = false, pagePath = '/', clipboard, gallery = false,
+  thumbChoice, smooth = false, withoutIntersectionObserver = false,
 } = {}) {
   const state = {
     items, manifestFails: false, manifestRequests: 0, failedManifestRequests: 0,
     qrRequests: [], videoRequests: [], rules: new Map(Object.entries(rules)),
   };
-  const html = template.renderWallHTML(cloud ? template.cloudVariantJS() : fixtureJS);
+  const html = gallery
+    ? template.renderGalleryHTML(template.galleryVariantJS(cloud))
+    : template.renderWallHTML(cloud ? template.cloudVariantJS() : fixtureJS);
   const wallPath = new URL(pagePath, 'http://127.0.0.1').pathname;
   const recoveryPath = new URL('./qr-recovery.html', `http://127.0.0.1${wallPath}`).pathname;
   const folder = wallPath.split('/').filter(Boolean).at(-2);
@@ -92,15 +95,20 @@ export async function openWall(t, runtime, {
     if (url.pathname === wallPath) {
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       response.end(html);
-    } else if (url.pathname === '/items' || (cloud && url.pathname.endsWith('/wall.json'))) {
+    } else if (url.pathname === '/api/status') {
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ activeEvent: 'Fixture activity' }));
+    } else if (url.pathname === '/api/renders') {
+      state.manifestRequests++;
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(state.items));
+    } else if (url.pathname === '/items' || (cloud && (url.pathname.endsWith('/wall.json') || url.pathname.endsWith('/gallery.json')))) {
       state.manifestRequests++;
       if (state.manifestFails) {
         state.failedManifestRequests++;
         response.writeHead(503).end('Temporarily unavailable');
       } else {
         response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify(cloud ? { items: state.items.map(entry => ({
-          id: entry.id, url: entry.videoURL, qr: entry.qrURL,
+        response.end(JSON.stringify(cloud ? { event: 'Fixture activity', items: state.items.map(entry => ({
+          id: entry.id, time: entry.time, url: entry.videoURL, qr: entry.qrURL,
         })) } : state.items));
       }
     } else if (cloud && url.pathname.endsWith('/current.json')) {
@@ -119,7 +127,7 @@ export async function openWall(t, runtime, {
       });
       response.writeHead(failed ? 404 : 200, { 'Content-Type': failed ? 'text/plain' : 'image/svg+xml' });
       response.end(failed ? 'QR not ready yet' : qrImage);
-    } else if (url.pathname === '/video.mp4') {
+    } else if (url.pathname === '/video.mp4' || url.pathname.startsWith('/video/')) {
       state.videoRequests.push(url.href);
       const total = runtime.video.length;
       const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range || '');
@@ -154,8 +162,11 @@ export async function openWall(t, runtime, {
     if (new URL(route.request().url()).origin === origin) return route.continue();
     return route.abort('blockedbyclient');
   });
-  await page.addInitScript(({ mode, dropFirstImageError, clipboard }) => {
+  await page.addInitScript(({ mode, dropFirstImageError, clipboard, thumbChoice, smooth, withoutIntersectionObserver }) => {
     localStorage.setItem('booth360.wall.mode', mode);
+    if (thumbChoice !== undefined) localStorage.setItem('booth360.wall.thumb', String(thumbChoice));
+    if (smooth) localStorage.setItem('booth360.wall.smooth', '1');
+    if (withoutIntersectionObserver) delete window.IntersectionObserver;
     if (clipboard) {
       window.__copiedRecoveryURLs = [];
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard === 'missing' ? undefined : {
@@ -174,9 +185,9 @@ export async function openWall(t, runtime, {
         event.stopImmediatePropagation();
       }
     }, true);
-  }, { mode, dropFirstImageError, clipboard });
+  }, { mode, dropFirstImageError, clipboard, thumbChoice, smooth, withoutIntersectionObserver });
   await page.goto(new URL(pagePath, origin).href, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector(`#stage.m-${mode} video`);
+  await page.waitForSelector(gallery ? '#grid video' : `#stage.m-${mode} video`);
   return { page, state, scriptErrors };
 }
 

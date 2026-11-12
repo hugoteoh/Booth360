@@ -34,22 +34,27 @@ struct GalleryView: View {
     }
 }
 
-/// 视频首帧缩略图（NSCache 缓存，key 为文件 URL）。
+/// 视频 37% 位置的静态缩略图；缓存版本避免沿用旧的首帧画面。
 @MainActor
 final class ThumbnailLoader {
     static let shared = ThumbnailLoader()
-    private let cache = NSCache<NSURL, UIImage>()
+    private let cache = NSCache<NSString, UIImage>()
 
     func thumbnail(for url: URL) async -> UIImage? {
-        if let cached = cache.object(forKey: url as NSURL) { return cached }
+        let key = "\(VideoThumbnailTiming.cacheVersion)|\(url.absoluteString)" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 600, height: 600)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
         do {
-            let (cgImage, _) = try await generator.image(at: .zero)
+            let duration = try await asset.load(.duration)
+            let (cgImage, _) = try await generator.image(at: VideoThumbnailTiming.time(for: duration))
             let image = UIImage(cgImage: cgImage)
-            cache.setObject(image, forKey: url as NSURL)
+            cache.setObject(image, forKey: key)
             return image
         } catch {
             return nil

@@ -22,6 +22,8 @@ final class ExternalWallPosterLoader {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 320, height: 568)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
         activeRequestID = requestID
         activeAsset = asset
         activeGenerator = generator
@@ -45,12 +47,7 @@ final class ExternalWallPosterLoader {
                     throw LoaderError.invalidDuration
                 }
 
-                let midpoint = CMTime(seconds: duration.seconds * 0.5,
-                                      preferredTimescale: 600)
-                // Extremely short clips may round the midpoint to the endpoint;
-                // zero is still a legal request for any positive finite duration.
-                let time = midpoint.isNumeric && midpoint >= .zero && midpoint < duration
-                    ? midpoint : .zero
+                let time = VideoThumbnailTiming.time(for: duration)
                 let (cgImage, _) = try await generator.image(at: time)
                 try checkCurrentRequest(requestID)
                 return UIImage(cgImage: cgImage)

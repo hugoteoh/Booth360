@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// 全屏倒数覆盖层。数字每秒缩放跳动，点「取消」返回待机。
+/// 全屏倒数覆盖层。半秒档先显示小数，再按整秒跳动，点「取消」返回待机。
 struct CountdownOverlayView: View {
-    let secondsRemaining: Int
+    let secondsRemaining: Double
     let onCancel: () -> Void
 
     var body: some View {
@@ -10,7 +10,7 @@ struct CountdownOverlayView: View {
             Color.black.opacity(0.55).ignoresSafeArea()
 
             VStack(spacing: 40) {
-                Text("\(secondsRemaining)")
+                Text(RecordingSettings.countdownLabel(secondsRemaining))
                     .font(.system(size: 160, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
                     .contentTransition(.numericText(countsDown: true))

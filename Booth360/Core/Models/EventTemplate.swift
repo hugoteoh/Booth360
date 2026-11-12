@@ -91,7 +91,7 @@ extension EventTemplate {
     }
 
     var recordingSettings: RecordingSettings {
-        RecordingSettings(countdownSeconds: countdownSeconds, recordingSeconds: recordingSeconds)
+        RecordingSettings(countdownSeconds: Double(countdownSeconds), recordingSeconds: recordingSeconds)
     }
 
     /// 拍摄模式列表（解码失败/未配置回落默认库；老数据自动迁移到当前模式清单）。

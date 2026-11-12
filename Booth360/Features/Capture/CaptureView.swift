@@ -405,15 +405,14 @@ struct CaptureView: View {
         HStack(spacing: 10) {
             Menu {
                 ForEach(RecordingSettings.countdownChoices, id: \.self) { seconds in
-                    Button(seconds == 0 ? "不倒数" : "\(seconds) 秒") {
+                    Button("\(RecordingSettings.countdownLabel(seconds)) 秒") {
                         viewModel.settings.countdownSeconds = seconds
                     }
                 }
             } label: {
                 pillLabel(
                     icon: "timer",
-                    text: viewModel.settings.countdownSeconds == 0
-                        ? "不倒数" : "倒数 \(viewModel.settings.countdownSeconds)s"
+                    text: "倒数 \(RecordingSettings.countdownLabel(viewModel.settings.countdownSeconds))s"
                 )
             }
 

@@ -231,3 +231,100 @@ test('At 720p the settings panel scrolls to recovery controls and Close without 
   await assertVideoContinues(page, before);
   assert.deepEqual(scriptErrors, []);
 });
+
+async function assertPausedThumbnailAt(page, selector, fraction) {
+  await page.waitForFunction(({ selector, fraction }) => {
+    const video = document.querySelector(selector);
+    return video && video.readyState >= 2 && !video.seeking && video.paused && video.videoWidth > 0 &&
+      Number.isFinite(video.duration) && video.duration > 0 &&
+      Math.abs(video.currentTime / video.duration - fraction) < 0.007;
+  }, { selector, fraction });
+  const frame = await page.locator(selector).evaluate(video => ({
+    time: video.currentTime, duration: video.duration, paused: video.paused,
+    seeking: video.seeking, error: video.error?.code || null,
+  }));
+  assert.equal(frame.error, null);
+  assert.equal(frame.paused, true);
+  assert.equal(frame.seeking, false);
+  assert.ok(Math.abs(frame.time / frame.duration - fraction) < 0.007,
+    `Decoded static frame must be near ${fraction * 100}%: ${JSON.stringify(frame)}`);
+}
+
+test('Featured cloud wall defaults its decoded static card to 37% while the hero keeps playing', { timeout: 15000 }, async t => {
+  const { page, scriptErrors } = await openWall(t, runtime, {
+    cloud: true, pagePath: '/booth360/wall/thumbnail-event/index.html', mode: 'featured',
+    items: [item('hero'), item('static-card')],
+  });
+  const before = await rememberPlayingVideo(page);
+  await assertPausedThumbnailAt(page, '.feat-strip video', 0.37);
+  await page.locator('#gear').click({ force: true });
+  assert.equal(await page.locator('#thumbRange').inputValue(), '37');
+  assert.equal(await page.locator('#thumbPct').textContent(), '37%');
+  await page.locator('#pclose').click();
+  await assertVideoContinues(page, before);
+  assert.deepEqual(scriptErrors, []);
+});
+
+test('Smooth grid wall defaults its non-playing fifth card to a decoded 37% frame', { timeout: 15000 }, async t => {
+  const { page, scriptErrors } = await openWall(t, runtime, {
+    smooth: true, items: Array.from({ length: 5 }, (_, index) => item(`clip-${index}`)),
+  });
+  const before = await rememberPlayingVideo(page);
+  await assertPausedThumbnailAt(page, '#stage .wcell:last-child video', 0.37);
+  await assertVideoContinues(page, before);
+  assert.deepEqual(scriptErrors, []);
+});
+
+test('Wall keeps explicitly saved custom, previous midpoint and first-frame choices', { timeout: 15000 }, async t => {
+  for (const fraction of [0.63, 0.5, 0]) {
+    const { page, scriptErrors } = await openWall(t, runtime, {
+      mode: 'featured', thumbChoice: fraction, items: [item('hero'), item('static-card')],
+    });
+    await assertPausedThumbnailAt(page, '.feat-strip video', fraction);
+    await page.locator('#gear').click({ force: true });
+    assert.equal(await page.locator('#thumbRange').inputValue(), String(fraction * 100));
+    assert.equal(await page.evaluate(() => localStorage.getItem('booth360.wall.thumb')), String(fraction));
+    assert.deepEqual(scriptErrors, []);
+  }
+});
+
+for (const cloud of [false, true]) {
+  test(`${cloud ? 'Cloud' : 'LAN'} gallery decodes the 37% preview${cloud ? ' without IntersectionObserver' : ' with lazy loading'}`, { timeout: 15000 }, async t => {
+    const { page, scriptErrors } = await openWall(t, runtime, {
+      cloud, gallery: true, pagePath: cloud ? '/booth360/wall/gallery-event/gallery.html' : '/gallery',
+      withoutIntersectionObserver: cloud,
+    });
+    await assertPausedThumbnailAt(page, '#grid video', 0.37);
+    assert.equal((await page.locator('#grid video').getAttribute('src')).includes('#t='), false,
+      'A fixed first-frame fragment must not override the metadata-based preview');
+    assert.deepEqual(scriptErrors, []);
+  });
+}
+
+test('Gallery refresh preserves a manually playing and scrubbed video in both production variants', { timeout: 15000 }, async t => {
+  for (const cloud of [false, true]) {
+    const { page, state, scriptErrors } = await openWall(t, runtime, {
+      cloud, gallery: true, pagePath: cloud ? '/booth360/wall/play-event/gallery.html' : '/gallery',
+    });
+    await assertPausedThumbnailAt(page, '#grid video', 0.37);
+    await page.locator('#grid video').evaluate(async video => {
+      video.currentTime = 6;
+      await video.play();
+      window.__galleryVideo = video;
+    });
+    const before = await page.evaluate(() => ({ time: window.__galleryVideo.currentTime,
+      src: window.__galleryVideo.getAttribute('src') }));
+    state.items = [item('clip-a', '/qr-a.svg', '/video.mp4?signature=renewed')];
+    await page.evaluate(() => load());
+    await page.waitForFunction(time => window.__galleryVideo.currentTime > time + 0.35, before.time);
+    const after = await page.locator('#grid video').evaluate(video => ({
+      sameNode: video === window.__galleryVideo, src: video.getAttribute('src'),
+      paused: video.paused, error: video.error?.code || null,
+    }));
+    assert.equal(after.sameNode, true);
+    assert.equal(after.src, before.src);
+    assert.equal(after.paused, false);
+    assert.equal(after.error, null);
+    assert.deepEqual(scriptErrors, []);
+  }
+});

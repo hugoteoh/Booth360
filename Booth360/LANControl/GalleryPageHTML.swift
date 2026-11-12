@@ -68,7 +68,7 @@ enum GalleryPageTemplate {
         let zipBusy = false;
 
         function cardHTML(item) {
-          // 不直接给 src：滚到视口附近才加载首帧（171 条也秒开）
+          // 不直接给 src：滚到视口附近才加载 37% 位置的静态画面。
           return `<div class="card">
             <video data-src="${item.videoURL}" controls muted playsinline preload="none"></video>
             <div class="meta">
@@ -77,25 +77,32 @@ enum GalleryPageTemplate {
             </div></div>`;
         }
 
-        // 视口懒加载：进入屏幕前 300px 才加载该条的首帧元数据
-        const lazyLoader = new IntersectionObserver((entries) => {
+        function loadThumbnail(v) {
+          if (v.getAttribute("src")) return;
+          v.addEventListener("loadedmetadata", () => {
+            // 只初始化未播放的卡片；用户已开始播放时保留其播放位置。
+            if (!v.isConnected || !v.paused || !isFinite(v.duration) || v.duration <= 0) return;
+            const edge = Math.min(0.05, v.duration * 0.01);
+            try { v.currentTime = Math.min(v.duration - edge, Math.max(edge, v.duration * 0.37)); } catch (e) {}
+          }, { once: true });
+          v.preload = "metadata";
+          v.src = v.dataset.src;
+        }
+
+        // 视口懒加载：进入屏幕前 300px 才加载该条元数据并定位静态画面。
+        const lazyLoader = "IntersectionObserver" in window ? new IntersectionObserver((entries) => {
           for (const entry of entries) {
             if (!entry.isIntersecting) continue;
             const v = entry.target;
-            if (!v.getAttribute("src")) {
-              v.preload = "metadata";
-              v.src = v.dataset.src + "#t=0.1";
-            }
+            loadThumbnail(v);
             lazyLoader.unobserve(v);
           }
-        }, { rootMargin: "300px 0px" });
+        }, { rootMargin: "300px 0px" }) : null;
 
         function observeLazy() {
           // 极老的浏览器不支持 IntersectionObserver 时退回全量加载
-          if (!("IntersectionObserver" in window)) {
-            grid.querySelectorAll("video:not([src])").forEach(v => {
-              v.preload = "metadata"; v.src = v.dataset.src + "#t=0.1";
-            });
+          if (!lazyLoader) {
+            grid.querySelectorAll("video:not([src])").forEach(loadThumbnail);
             return;
           }
           grid.querySelectorAll("video:not([src])").forEach(v => lazyLoader.observe(v));

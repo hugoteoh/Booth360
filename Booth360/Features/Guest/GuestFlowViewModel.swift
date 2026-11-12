@@ -13,7 +13,7 @@ final class GuestFlowViewModel {
 
     enum Phase: Equatable {
         case welcome
-        case countingDown(Int)
+        case countingDown(Double)
         case recording(remaining: Int)
         case processing
         case result
@@ -104,7 +104,7 @@ final class GuestFlowViewModel {
     private static func phaseText(_ phase: Phase) -> String {
         switch phase {
         case .welcome: return "等待开始"
-        case .countingDown(let n): return "倒数 \(n)"
+        case .countingDown(let n): return "倒数 \(RecordingSettings.countdownLabel(n))"
         case .recording(let r): return "录制中（剩 \(r)s）"
         case .processing: return "处理中"
         case .result: return "展示成品"
@@ -125,9 +125,7 @@ final class GuestFlowViewModel {
     func startTapped() {
         guard phase == .welcome, cameraEngine.status == .running else { return }
         if blockedProvider?() == true { return }
-        let mode = selectedShotMode
-        phase = .countingDown(event.countdownSeconds)
-        flowTask = Task { await runFlow(mode: mode) }
+        startFlow(mode: selectedShotMode)
     }
 
     /// 倒数阶段取消。
@@ -149,9 +147,7 @@ final class GuestFlowViewModel {
             AppLogger.ui.info("嘉宾重拍，作废成品 \(render.fileName, privacy: .public)")
         }
         cleanupResult()
-        let mode = selectedShotMode
-        phase = .countingDown(event.countdownSeconds)
-        flowTask = Task { await runFlow(mode: mode) }
+        startFlow(mode: selectedShotMode)
     }
 
     /// 嘉宾确认满意：此刻才开始上传（上传完成后大屏自动出现二维码）。
@@ -164,28 +160,36 @@ final class GuestFlowViewModel {
 
     // MARK: - 主流程
 
-    private func runFlow(mode: ShotMode) async {
+    private func startFlow(mode: ShotMode) {
+        // 拍摄页全局选择优先；从未选过时兼容旧活动，不改写其持久化 Int 字段。
+        let countdown = RecordingSettings.loadCountdownSeconds(fallback: Double(event.countdownSeconds))
+        let startedAt = ContinuousClock.now
+        phase = .countingDown(countdown)
+        flowTask = Task { await runFlow(mode: mode, countdown: countdown, startedAt: startedAt) }
+    }
+
+    private func runFlow(mode: ShotMode, countdown: Double, startedAt: ContinuousClock.Instant) async {
         guard !Task.isCancelled else { return }
         autoReturnTask?.cancel()
         let totalSeconds = mode.recordingSeconds
 
         // 1. 倒数（默认「倒数即转」：倒数期间转台加速到匀速）
-        let countdown = event.countdownSeconds
         var spinning = false
         if countdown > 0 {
             if event.turntableSpinEnabled, turntable?.config.spinAtCountdown == true {
                 turntable?.startSpin(recordingSeconds: totalSeconds, leadSeconds: countdown)
                 spinning = true
             }
-            for remaining in stride(from: countdown, through: 1, by: -1) {
-                phase = .countingDown(remaining)
-                try? await Task.sleep(for: .seconds(1))
-                if Task.isCancelled {
-                    // cancelCountdown / teardown 已同步停转，旧任务不再干扰下一轮。
-                    return
+            do {
+                try await CountdownSchedule(seconds: countdown).run(startedAt: startedAt) { remaining in
+                    phase = .countingDown(remaining)
                 }
+            } catch {
+                // cancelCountdown / teardown 已同步停转，旧任务不再干扰下一轮。
+                return
             }
         }
+        guard !Task.isCancelled else { return }
 
         // 2. 录制（自动停止由引擎 maxRecordedDuration 保证）；未在倒数起转的此刻起转
         if event.turntableSpinEnabled, !spinning {

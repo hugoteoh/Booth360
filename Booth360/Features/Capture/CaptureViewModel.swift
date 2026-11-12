@@ -15,7 +15,7 @@ final class CaptureViewModel {
 
     enum Phase: Equatable {
         case idle
-        case countingDown(Int)
+        case countingDown(Double)
         case recording
         case saving
     }
@@ -167,7 +167,7 @@ final class CaptureViewModel {
         if processing { return "处理中" }
         switch phase {
         case .idle: return "待机"
-        case .countingDown(let n): return "倒数 \(n)"
+        case .countingDown(let n): return "倒数 \(RecordingSettings.countdownLabel(n))"
         case .recording: return "录制中"
         case .saving: return "保存中"
         }
@@ -201,7 +201,6 @@ final class CaptureViewModel {
         static let lens = "booth360.capture.lens"
         static let resolution = "booth360.capture.resolution"
         static let frameRate = "booth360.capture.frameRate"
-        static let countdown = "booth360.capture.countdown"
         static let recordSeconds = "booth360.capture.recordSeconds"
     }
 
@@ -233,9 +232,7 @@ final class CaptureViewModel {
     private static func loadSettings() -> RecordingSettings {
         var settings = RecordingSettings()
         let defaults = UserDefaults.standard
-        if defaults.object(forKey: PersistKey.countdown) != nil {
-            settings.countdownSeconds = defaults.integer(forKey: PersistKey.countdown)
-        }
+        settings.countdownSeconds = RecordingSettings.loadCountdownSeconds(defaults: defaults)
         if defaults.object(forKey: PersistKey.recordSeconds) != nil {
             settings.recordingSeconds = defaults.integer(forKey: PersistKey.recordSeconds)
         }
@@ -244,7 +241,7 @@ final class CaptureViewModel {
 
     private static func persistSettings(_ settings: RecordingSettings) {
         let defaults = UserDefaults.standard
-        defaults.set(settings.countdownSeconds, forKey: PersistKey.countdown)
+        RecordingSettings.storeCountdownSeconds(settings.countdownSeconds, defaults: defaults)
         defaults.set(settings.recordingSeconds, forKey: PersistKey.recordSeconds)
     }
 
@@ -262,7 +259,9 @@ final class CaptureViewModel {
         recordingEvent = modelContext.flatMap { EventManager.activeEvent(in: $0) }
         recordingShotMode = selectedShotMode
 
-        let countdown = settings.countdownSeconds
+        let schedule = CountdownSchedule(seconds: settings.countdownSeconds)
+        let countdown = schedule.durationSeconds
+        let countdownStartedAt = ContinuousClock.now
         // 同步离开 idle，堵住 Task 真正启动前的重复点击/自动触发窗口。
         phase = .countingDown(countdown)
         // 转台：默认「倒数即转」——倒数期间加速到匀速，录制第一帧就是稳定环绕
@@ -272,16 +271,11 @@ final class CaptureViewModel {
         }
         countdownTask = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
-            if countdown > 0 {
-                for remaining in stride(from: countdown, through: 1, by: -1) {
+            do {
+                try await schedule.run(startedAt: countdownStartedAt) { remaining in
                     self.phase = .countingDown(remaining)
-                    do {
-                        try await Task.sleep(for: .seconds(1))
-                    } catch {
-                        return
-                    }
                 }
-            }
+            } catch { return }
             guard !Task.isCancelled else { return }
             await self.beginRecording()
         }

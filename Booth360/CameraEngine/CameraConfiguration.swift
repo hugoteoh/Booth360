@@ -98,11 +98,45 @@ struct CameraConfiguration: Equatable {
 
 /// 单次拍摄参数（与会话配置分离：改这些不需要重建会话）。
 struct RecordingSettings: Equatable {
-    /// 倒数秒数，0 表示不倒数。
-    var countdownSeconds: Int = 3
+    private var countdownDuration: Double
+    /// 倒数固定为 3...5 秒之间的半秒档，不影响相机会话配置。
+    var countdownSeconds: Double {
+        get { countdownDuration }
+        set { countdownDuration = Self.normalizedCountdown(newValue) }
+    }
     /// 录制时长（到时自动停止）。
-    var recordingSeconds: Int = 15
+    var recordingSeconds: Int
 
-    static let countdownChoices = [0, 3, 5, 10]
+    init(countdownSeconds: Double = 3, recordingSeconds: Int = 15) {
+        countdownDuration = Self.normalizedCountdown(countdownSeconds)
+        self.recordingSeconds = recordingSeconds
+    }
+
+    static let countdownChoices: [Double] = [3, 3.5, 4, 4.5, 5]
     static let durationChoices = [5, 10, 15, 20, 30, 45, 60]
+    private static let countdownPreferenceKey = "booth360.capture.countdown"
+
+    static func normalizedCountdown(_ seconds: Double) -> Double {
+        guard seconds.isFinite else { return 3 }
+        return (min(5, max(3, seconds)) * 2).rounded() / 2
+    }
+
+    /// 数字用于菜单与剩余时间，不将剩余的 1 / 2 秒再次归一为设置档位。
+    static func countdownLabel(_ seconds: Double) -> String {
+        String(format: seconds.rounded() == seconds ? "%.0f" : "%.1f",
+               locale: Locale(identifier: "en_US_POSIX"), seconds)
+    }
+
+    /// double 读取同时兼容旧 NSNumber(Int) 与新半秒设置；旧 0 / 10 档回落到 3 / 5。
+    static func loadCountdownSeconds(defaults: UserDefaults = .standard,
+                                     fallback: Double = 3) -> Double {
+        guard defaults.object(forKey: countdownPreferenceKey) != nil else {
+            return normalizedCountdown(fallback)
+        }
+        return normalizedCountdown(defaults.double(forKey: countdownPreferenceKey))
+    }
+
+    static func storeCountdownSeconds(_ seconds: Double, defaults: UserDefaults = .standard) {
+        defaults.set(normalizedCountdown(seconds), forKey: countdownPreferenceKey)
+    }
 }

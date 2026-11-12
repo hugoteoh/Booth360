@@ -147,6 +147,11 @@ struct TurntableConfig: Equatable {
         defaults.set(rememberedDeviceID, forKey: Key.device)
     }
 
+    /// 倒数可含半秒，但硬件自停时长必须向上取整，避免提前停止。
+    static func recordingTimeoutSeconds(recordingSeconds: Int, leadSeconds: Double) -> Int {
+        Int((leadSeconds + Double(recordingSeconds) + 3).rounded(.up))
+    }
+
     /// MWE 360 Controller 12 字节帧：AA CC [方向] [速度] 22 00 [时长s] 11 00 [校验] CC AA
     /// 校验 = 第 2…8 字节之和的低 8 位。方向 0x11 顺 / 0x22 逆 / 0x33 停；速度 0x11…0x88。
     static func mweFrame(switchByte: UInt8, speedLevel: Int, seconds: Int) -> Data {
@@ -274,9 +279,11 @@ final class TurntableService: NSObject {
     }
 
     /// 拍摄起转：leadSeconds 是提前量（倒数秒数），recordingSeconds 是录制时长。
-    /// 帧内自停 = 提前量 + 录制 + 3 秒兜底，录完仍显式发停止。
-    func startSpin(recordingSeconds: Int, leadSeconds: Int) {
-        startSpin(level: config.speedLevel, seconds: leadSeconds + recordingSeconds + 3)
+    /// 帧内自停只支持整秒：提前量 + 录制 + 3 秒兜底后向上取整，录完仍显式发停止。
+    func startSpin(recordingSeconds: Int, leadSeconds: Double) {
+        let timeout = TurntableConfig.recordingTimeoutSeconds(recordingSeconds: recordingSeconds,
+                                                             leadSeconds: leadSeconds)
+        startSpin(level: config.speedLevel, seconds: timeout)
     }
 
     private func startSpin(level: Int, seconds: Int) {
