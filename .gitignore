@@ -3,6 +3,9 @@
 
 # 构建产物
 build/
+cloud-ai/data/
+cloud-ai/.env
+__pycache__/
 DerivedData/
 *.ipa
 *.xcarchive
