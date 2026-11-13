@@ -51,12 +51,14 @@ final class UploadQueue {
     private(set) var isOnline = true
     /// 正在上传条目的进度 0…1（key 为 RenderedVideo.id）。
     private(set) var progressByID: [UUID: Double] = [:]
+    private(set) var publishingAIEventIDs: Set<UUID> = []
 
     @ObservationIgnored private var pathMonitor: NWPathMonitor?
     @ObservationIgnored private var retryTask: Task<Void, Never>?
     @ObservationIgnored private var retryFireDate: Date?
     /// 失败条目的下次重试时间（仅内存；重启后立即可重试）。
     @ObservationIgnored private var nextRetryAt: [UUID: Date] = [:]
+    @ObservationIgnored private var aiSourceTask: Task<Void, Never>?
 
     var isEnabled: Bool { UploadMode.current != .off }
 
@@ -88,6 +90,7 @@ final class UploadQueue {
     /// 触发点：App 启动、上传方式切换、COS 配置保存——用户永远不需要手动补传。
     func enqueueAllPending() {
         guard isEnabled else { return }
+        syncAISources()
         let descriptor = FetchDescriptor<RenderedVideo>(
             predicate: #Predicate {
                 $0.uploadStateRawValue == "none" || $0.uploadStateRawValue == "failed"
@@ -108,6 +111,7 @@ final class UploadQueue {
     /// App 启动时调用：上次中断在 uploading 的回退为 queued，连同 queued/failed 一起继续。
     func resumePendingOnLaunch() {
         guard isEnabled else { return }
+        syncAISources()
         let descriptor = FetchDescriptor<RenderedVideo>(
             predicate: #Predicate {
                 $0.uploadStateRawValue == "uploading"
@@ -172,7 +176,7 @@ final class UploadQueue {
 
         let fileURL = storage.renderURL(fileName: render.fileName)
         // 对象键沿用 AI PhotoBooth Pro 的组织方式
-        let objectKey = "booth360/\(render.id.uuidString.lowercased())/\(render.fileName)"
+        let objectKey = AICloudMetadata.originalObjectKey(render.id, fileName: render.fileName)
         let renderID = render.id
         do {
             let downloadURL = try await backend.upload(
@@ -192,6 +196,7 @@ final class UploadQueue {
             try? modelContext.save()
             AppLogger.storage.info("上传完成: \(render.fileName, privacy: .public)")
             publishCloudWallIfNeeded()
+            syncAISources()
         } catch {
             progressByID[renderID] = nil
             render.uploadAttempts += 1
@@ -202,6 +207,72 @@ final class UploadQueue {
             nextRetryAt[render.id] = Date().addingTimeInterval(delay)
             AppLogger.storage.error("上传失败(第\(render.uploadAttempts)次): \(error.localizedDescription, privacy: .public)，\(Int(delay))s 后重试")
             scheduleRetry(after: delay)
+        }
+    }
+
+    func setAIEnabled(_ enabled: Bool, for event: EventTemplate) async throws {
+        let eventID = event.id
+        let config = COSConfig.load()
+        guard config.isComplete, !enabled || UploadMode.current == .cos else {
+            throw UploadError.notConfigured
+        }
+        guard publishingAIEventIDs.insert(eventID).inserted else { return }
+        defer { publishingAIEventIDs.remove(eventID) }
+        try await AICloudMetadata.putEvent(eventID, enabled: enabled, config: config)
+        guard !event.isDeleted, event.modelContext != nil else {
+            Self.deleteRemoteObjects([AICloudMetadata.eventKey(eventID)], config: config)
+            return
+        }
+        event.aiEnabledCOSHost = enabled ? config.host : nil
+        try modelContext.save()
+        syncAISources()
+    }
+
+    /// Independent of the normal upload queue. A failed metadata write can never invalidate its QR.
+    private func syncAISources() {
+        guard aiSourceTask == nil, UploadMode.current == .cos, isOnline else { return }
+        aiSourceTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.aiSourceTask = nil }
+            var failures = 0
+            while self.isOnline, UploadMode.current == .cos {
+                let config = COSConfig.load()
+                guard config.isComplete, let render = self.nextAISource(config: config),
+                      let eventID = render.eventID else { return }
+                let videoID = render.id
+                let source = AICloudMetadata.Source(eventID: eventID, videoID: videoID, fileName: render.fileName)
+                do {
+                    try await AICloudMetadata.putSource(source, videoID: videoID, config: config)
+                    if render.isDeleted || render.modelContext == nil {
+                        Self.deleteRemoteObjects([AICloudMetadata.sourceKey(videoID)], config: config)
+                    } else {
+                        render.aiSourceCOSHost = config.host
+                        try self.modelContext.save()
+                    }
+                    failures = 0
+                } catch {
+                    if !render.isDeleted, render.modelContext != nil {
+                        render.aiSourceCOSHost = nil
+                    }
+                    failures += 1
+                    AppLogger.storage.warning("AI 来源索引同步失败，将重试")
+                    try? await Task.sleep(for: .seconds(UploadBackoff.delaySeconds(attempt: failures)))
+                }
+            }
+        }
+    }
+
+    private func nextAISource(config: COSConfig) -> RenderedVideo? {
+        let host: String? = config.host
+        let descriptor = FetchDescriptor<RenderedVideo>(
+            predicate: #Predicate {
+                $0.uploadStateRawValue == "done" && $0.eventID != nil && $0.aiSourceCOSHost != host
+            },
+            sortBy: [SortDescriptor(\RenderedVideo.createdAt, order: .reverse)]
+        )
+        return (try? modelContext.fetch(descriptor))?.first { render in
+            AICloudMetadata.isUploadedToCOS(render.remoteURLString, videoID: render.id,
+                                            fileName: render.fileName, config: config)
         }
     }
 
@@ -219,7 +290,7 @@ final class UploadQueue {
         publishCloudWallIfNeeded()
     }
 
-    /// 删除整场活动时清理它的云端大屏/备用入口/总览页面（尽力而为）。
+    /// 删除整场活动时清理它的云端大屏/备用入口/总览页面和 AI 开关（尽力而为）。
     func cleanupEventWall(eventID: UUID) {
         guard UploadMode.current == .cos else { return }
         let config = COSConfig.load()
@@ -231,19 +302,9 @@ final class UploadQueue {
             "booth360/wall/\(folder)/qr-recovery.html",
             "booth360/wall/\(folder)/gallery.json",
             "booth360/wall/\(folder)/gallery.html",
+            AICloudMetadata.eventKey(eventID),
         ]
-        Task.detached {
-            for key in keys {
-                guard let url = COSSigner.signedURL(
-                    config: config, objectKey: key, method: "delete", expiresSeconds: 600) else {
-                    continue
-                }
-                var request = URLRequest(url: url)
-                request.httpMethod = "DELETE"
-                request.timeoutInterval = 30
-                _ = try? await URLSession.shared.data(for: request)
-            }
-        }
+        Self.deleteRemoteObjects(keys, config: config)
     }
 
     /// 删除成品时清理它在 COS 上的对象（视频 / 落地页 / 二维码，尽力而为，不阻塞删除）。
@@ -253,7 +314,12 @@ final class UploadQueue {
         let config = COSConfig.load()
         guard config.isComplete else { return }
         let baseKey = "booth360/\(id.uuidString.lowercased())"
-        let keys = ["\(baseKey)/\(fileName)", "\(baseKey)/index.html", "\(baseKey)/qr.png", "\(baseKey)/v.json"]
+        let keys = ["\(baseKey)/\(fileName)", "\(baseKey)/index.html", "\(baseKey)/qr.png", "\(baseKey)/v.json",
+                    AICloudMetadata.sourceKey(id)]
+        Self.deleteRemoteObjects(keys, config: config)
+    }
+
+    private static func deleteRemoteObjects(_ keys: [String], config: COSConfig) {
         Task.detached {
             for key in keys {
                 guard let url = COSSigner.signedURL(
@@ -381,6 +447,7 @@ final class UploadQueue {
                 if online, wasOffline {
                     AppLogger.storage.info("网络恢复，继续上传队列")
                     self.pump()
+                    self.syncAISources()
                 }
             }
         }

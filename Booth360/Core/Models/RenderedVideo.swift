@@ -24,6 +24,8 @@ final class RenderedVideo {
     var lastUploadError: String?
     /// 所属活动（嘉宾模式产出时记录）。
     var eventID: UUID?
+    /// 已发布 AI 来源索引的 COS 桶域名，空值会在后台补传。
+    var aiSourceCOSHost: String?
     /// 不在大屏展示（单条隐藏；本地/云端大屏都生效）。
     var hiddenFromWall: Bool = false
 

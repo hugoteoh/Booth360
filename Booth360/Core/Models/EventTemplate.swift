@@ -15,6 +15,8 @@ final class EventTemplate {
     var welcomeSubtitle: String
     /// 成品页无操作 N 秒后自动回首页。
     var autoReturnSeconds: Int
+    /// 当前已发布开启 AI 的 COS 桶域名。旧活动及新活动默认关闭。
+    var aiEnabledCOSHost: String?
 
     // 素材（活动目录内文件名）
     var logoFileName: String?

@@ -227,27 +227,7 @@ enum CloudWallPublisher {
         contentType: String,
         config: COSConfig
     ) async throws {
-        guard let url = COSSigner.signedURL(
-            config: config,
-            objectKey: objectKey,
-            method: "put",
-            expiresSeconds: 600,
-            extraHeaders: ["x-cos-acl": "public-read", "cache-control": "no-cache"]
-        ) else {
-            throw UploadError.network("无法构造发布 URL")
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.setValue("public-read", forHTTPHeaderField: "x-cos-acl")
-        // no-cache：大屏页/清单每次发布都会变，不加的话浏览器会缓存旧页（改了没生效的坨）
-        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 60
-        let (body, response) = try await URLSession.shared.upload(for: request, from: data)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw UploadError.serverRejected(
-                statusCode: code, body: String(data: body, encoding: .utf8) ?? "")
-        }
+        try await TencentCOSBackend.putObject(data: data, objectKey: objectKey,
+                                             contentType: contentType, config: config, acl: "public-read")
     }
 }

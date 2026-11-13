@@ -86,12 +86,26 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertEqual(EventManager.activeEventID, event.id, "第一个活动自动设为当前")
         XCTAssertEqual(event.cameraConfiguration.frameRate, .fps60)
         XCTAssertEqual(event.recordingSettings.recordingSeconds, 15)
+        XCTAssertNil(event.aiEnabledCOSHost)
+    }
+
+    func testAISettingPersistsForActivity() throws {
+        let event = manager.createEvent(named: "AI 活动", in: context)
+        let host = "test-1250000000.cos.ap-shanghai.myqcloud.com"
+        event.aiEnabledCOSHost = host
+        try context.save()
+
+        let freshContext = ModelContext(container)
+        let id = event.id
+        let descriptor = FetchDescriptor<EventTemplate>(predicate: #Predicate { $0.id == id })
+        XCTAssertEqual(try freshContext.fetch(descriptor).first?.aiEnabledCOSHost, host)
     }
 
     func testDuplicateCopiesFieldsAndAssets() throws {
         let event = manager.createEvent(named: "原活动", in: context)
         event.welcomeTitle = "自定义标题"
         event.recordingSeconds = 30
+        event.aiEnabledCOSHost = "test-1250000000.cos.ap-shanghai.myqcloud.com"
         var settings = event.effectSettings
         settings.style = .boomerang
         event.effectSettings = settings
@@ -106,6 +120,7 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertEqual(copy.effectSettings.style, .boomerang)
         XCTAssertEqual(copy.overlayFileName, "overlay.png")
         XCTAssertNotEqual(copy.id, event.id)
+        XCTAssertNil(copy.aiEnabledCOSHost)
         // 素材文件真的复制到了新目录
         let copiedFile = manager.assetURL(event: copy, fileName: "overlay.png")
         XCTAssertTrue(FileManager.default.fileExists(atPath: copiedFile.path))

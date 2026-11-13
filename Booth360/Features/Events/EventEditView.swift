@@ -5,11 +5,13 @@ import UniformTypeIdentifiers
 
 /// 活动编辑：名称/文案、素材（Logo/背景/Overlay/音乐）、拍摄参数、效果参数。
 /// SwiftData @Model 可直接 @Bindable 双向绑定，改动即持久化。
+@MainActor
 struct EventEditView: View {
     @Bindable var event: EventTemplate
     let storage: FileStorageService
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(UploadQueue.self) private var uploadQueue
     @State private var logoPickerItem: PhotosPickerItem?
     @State private var backgroundPickerItem: PhotosPickerItem?
     @State private var overlayPickerItem: PhotosPickerItem?
@@ -25,6 +27,12 @@ struct EventEditView: View {
     @State private var shotModesDraft: [ShotMode] = []
 
     private var manager: EventManager { EventManager(storage: storage) }
+    private var isAIGatePublishing: Bool { uploadQueue.publishingAIEventIDs.contains(event.id) }
+    private var isAIEnabled: Bool { event.aiEnabledCOSHost == COSConfig.load().host }
+    private var canPublishAIGate: Bool {
+        uploadQueue.isOnline && COSConfig.load().isComplete
+            && (UploadMode.current == .cos || isAIEnabled)
+    }
 
     /// 本活动的云端目录（COS 配好才显示链接）。
     private var cloudBase: String? {
@@ -40,6 +48,8 @@ struct EventEditView: View {
                 Stepper("成品页 \(event.autoReturnSeconds)s 后自动返回",
                         value: $event.autoReturnSeconds, in: 5...120, step: 5)
             }
+
+            aiSection
 
             Section {
                 assetPickerRow(title: "Logo", fileName: event.logoFileName,
@@ -170,6 +180,42 @@ struct EventEditView: View {
     }
 
     // MARK: - 行组件
+
+    private var aiSection: some View {
+        Section {
+            Toggle("嘉宾可生成 AI 版", isOn: Binding(
+                get: { isAIEnabled },
+                set: { enabled in
+                    Task {
+                        do {
+                            try await uploadQueue.setAIEnabled(enabled, for: event)
+                        } catch {
+                            let operation = enabled ? "开启" : "关闭"
+                            let status: String
+                            if case UploadError.serverRejected(let code, _) = error {
+                                status = "（HTTP \(code)）"
+                            } else {
+                                status = ""
+                            }
+                            errorMessage = "未能确认 AI 设置已\(operation)\(status)，请重试。"
+                        }
+                    }
+                }
+            ))
+            .disabled(isAIGatePublishing || !canPublishAIGate)
+            if isAIGatePublishing {
+                ProgressView("正在同步活动设置")
+            }
+        } header: {
+            Text("AI 卡点变身")
+        } footer: {
+            if canPublishAIGate {
+                Text("开启后，嘉宾可在扫码页面申请生成 AI 版，原版视频可以照常保存。")
+            } else {
+                Text("需要联网并配置腾讯云 COS 上传才能同步此设置。")
+            }
+        }
+    }
 
     private func shotModeSettingsRow(at index: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {

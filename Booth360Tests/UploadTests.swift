@@ -114,4 +114,41 @@ final class UploadTests: XCTestCase {
         incomplete.bucket = ""
         XCTAssertFalse(incomplete.isComplete)
     }
+
+    func testPrivateAIRecordKeysAndSchema() throws {
+        let eventID = try XCTUnwrap(UUID(uuidString: "F4D5F368-1142-4181-97D1-4A984A8C22A3"))
+        let videoID = try XCTUnwrap(UUID(uuidString: "72EF184B-C013-4761-A587-B1A318DD027C"))
+        let source = AICloudMetadata.Source(eventID: eventID, videoID: videoID, fileName: "original.mp4")
+        let sourceData = try JSONEncoder().encode(source)
+        let sourceJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: sourceData) as? [String: Any])
+        XCTAssertEqual(AICloudMetadata.eventKey(eventID), "booth360/ai/events/f4d5f368-1142-4181-97d1-4a984a8c22a3.json")
+        XCTAssertEqual(AICloudMetadata.sourceKey(videoID), "booth360/ai/sources/72ef184b-c013-4761-a587-b1a318dd027c.json")
+        XCTAssertEqual(sourceJSON["schema"] as? Int, 1)
+        XCTAssertEqual(sourceJSON["eventId"] as? String, "f4d5f368-1142-4181-97d1-4a984a8c22a3")
+        XCTAssertEqual(sourceJSON["objectKey"] as? String, "booth360/72ef184b-c013-4761-a587-b1a318dd027c/original.mp4")
+
+        for enabled in [true, false] {
+            let eventData = try JSONEncoder().encode(AICloudMetadata.EventGate(enabled: enabled))
+            let eventJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: eventData) as? [String: Any])
+            XCTAssertEqual(eventJSON["schema"] as? Int, 1)
+            XCTAssertEqual(eventJSON["enabled"] as? Bool, enabled)
+        }
+    }
+
+    func testAIBackfillOnlyRecognizesOriginalsInConfiguredCOS() {
+        let videoID = UUID()
+        let fileName = "original.mp4"
+        var active = config
+        active.customDomain = "booth.example.org"
+        let base = "/booth360/\(videoID.uuidString.lowercased())"
+        func matches(_ url: String) -> Bool {
+            AICloudMetadata.isUploadedToCOS(url, videoID: videoID, fileName: fileName, config: active)
+        }
+
+        XCTAssertTrue(matches("https://\(active.host)\(base)/original.mp4?q-signature=test"))
+        XCTAssertTrue(matches("https://booth.example.org\(base)/index.html"))
+        XCTAssertFalse(matches("https://mock.booth360.local/download\(base)/original.mp4"))
+        XCTAssertFalse(matches("https://other.cos.ap-shanghai.myqcloud.com\(base)/original.mp4"))
+        XCTAssertFalse(matches("https://booth.example.org\(base)/another.mp4"))
+    }
 }

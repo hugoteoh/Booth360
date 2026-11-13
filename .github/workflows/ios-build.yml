@@ -5,7 +5,7 @@ name: iOS Build
 
 on:
   push:
-    branches: [ main, codex/adjustable-shot-modes, codex/independent-airplay-wall, codex/wall-qr-recovery ]
+    branches: [ main, codex/adjustable-shot-modes, codex/independent-airplay-wall, codex/wall-qr-recovery, codex/booth360-ai-pilot ]
   workflow_dispatch:
 
 permissions:
