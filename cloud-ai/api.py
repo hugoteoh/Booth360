@@ -124,11 +124,11 @@ def create_app(settings, storage, wechat, session_secret):
 
     @app.get(PREFIX + '/videos/{video_id}/original')
     def original(video_id: str, authorization: str | None = Header(default=None)):
-        sessions.owner(authorization)
-        source = source_metadata(storage, identifier(video_id))
-        if not source:
+        owner, video_id = sessions.owner(authorization), identifier(video_id)
+        job = queue.find(video_id)
+        if not job or job['owner'] != owner or source_metadata(storage, video_id) is None:
             raise Problem(404, 'original_not_found')
-        return {'downloadUrl': storage.signed_url(source[1])}
+        return {'downloadUrl': storage.signed_url(job['source_key'])}
 
     @app.post(PREFIX + '/videos/{video_id}/jobs')
     def generate(video_id: str, body: JobRequest, authorization: str | None = Header(default=None)):

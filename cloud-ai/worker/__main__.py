@@ -43,8 +43,10 @@ def generate(args, theme, timing, fps, directory, journal):
         return args.mock_generated
     guide_url = args.guide_url or os.environ.get("BOOTH360_AI_SHANGHAI_GUIDE_URL")
     guide_order = (
-        "@video_1 demonstrates the rhythm and order of the three actions. Use it only for choreography; "
-        "the supplied stills define the subject, costume, setting and any original event graphics."
+        "@video_1 demonstrates camera motion, timing, and continuity. The person in the video guide is "
+        "unrelated to the subject and their appearance and accessories are not a reference. "
+        "The real first frame and the supplied stills define the sole subject's facial identity, clothing, "
+        "setting and any original event graphics."
     )
     has_task = bool(journal.state.get("video", {}).get("taskId"))
     if not has_task:

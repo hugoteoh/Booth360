@@ -35,8 +35,9 @@ THEMES = {
 
 def wardrobe_prompt(theme):
     return (
-        "Edit the reference photograph as a realistic portrait. Preserve this exact person, face, glasses, "
+        "Edit the reference photograph as a realistic portrait. Preserve this exact person, face, "
         "hair color, body shape, pose, camera angle and scale. Keep their arms relaxed below the waist. "
+        "Keep any eyewear already visible on this person. If their face is bare, keep it bare. "
         f"Change the clothing to {theme.wardrobe}. The same real venue, lighting, floor and fixed background "
         "are still visible. Preserve existing event marks, without adding lettering or props. Full portrait 9:16."
     )
@@ -45,7 +46,8 @@ def wardrobe_prompt(theme):
 def tail_prompt(theme):
     return (
         "The first image is the identity and camera-framing reference. The second image shows the same person in "
-        f"the finished clothes. Keep their face, hair color, glasses and body proportions. Keep {theme.wardrobe}. "
+        f"the finished clothes. Keep their face, hair color and body proportions. Keep {theme.wardrobe}. "
+        "Match eyewear to the first image: preserve it only if it is present in the original photograph. "
         f"Place the person in {theme.scene}. In a late frontal three-quarter view, {theme.ending}. "
         "Maintain realistic anatomy, lighting and full portrait framing. Keep existing event overlay marks "
         "in the same positions and add no marks or signage."
@@ -57,7 +59,8 @@ def video_prompt(theme, direction, times, guide_order):
     front, scene, ending = times
     return (
         "One uninterrupted eight-second photoreal camera orbit around the person in the first frame. "
-        "Preserve their identity, proportions, glasses, hair color, and position. "
+        "Preserve their identity, proportions, hair color and position. Match eyewear to the original "
+        "first frame and the real person throughout; do not introduce glasses if none are present. "
         f"{guide_order} Use the same camera direction as the real opening, with fixed objects moving "
         f"from screen {start_edge} to {direction}. Continue from near side to first front, far profile, back "
         "and then towards the face again. Keep hands relaxed and low through the transformation. "

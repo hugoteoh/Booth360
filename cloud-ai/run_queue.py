@@ -44,7 +44,7 @@ class Runner:
     def run_pipeline(self, job, path, source):
         command = [sys.executable, '-m', 'worker', '--source', str(source),
                    '--theme', job['theme'], '--work-dir', str(path)]
-        guide = os.getenv('BOOTH360_AI_' + job['theme'].upper() + '_GUIDE_KEY') or os.getenv('BOOTH360_AI_SHANGHAI_GUIDE_KEY')
+        guide = os.getenv(f"BOOTH360_AI_{job['theme'].upper()}_GUIDE_KEY") or os.getenv('BOOTH360_AI_SHANGHAI_GUIDE_KEY')
         if guide:
             command.extend(('--guide-url', self.storage.signed_url(guide, 3600)))
         direction = os.getenv('BOOTH360_AI_GUIDE_DIRECTION', 'left')
@@ -81,7 +81,9 @@ class Runner:
                 return True
             candidate, review = path / 'candidate.mp4', path / 'review.json'
             if code != 0 or not candidate.is_file() or not review.is_file():
-                self.queue.transition(job['id'], 'processing', 'failed', message='pipeline_failed')
+                raw_ready = (path / 'generated.mp4').is_file()
+                self.queue.transition(job['id'], 'processing', 'review' if raw_ready else 'failed',
+                                      message='composition_failed' if raw_ready else 'pipeline_failed')
                 print(f"Job {job['id']} failed (worker exit {code})", flush=True)
                 return True
             key = result_key(job)
@@ -102,7 +104,9 @@ class Runner:
         report = json.loads((path / 'review.json').read_text(encoding='utf-8'))
         if report.get('status') != 'review':
             raise ValueError('Missing updated review result')
-        self.storage.upload(job['result_key'], path / 'candidate.mp4')
+        key = result_key(job)
+        self.storage.upload(key, path / 'candidate.mp4')
+        self.queue.transition(job['id'], 'review', 'review', key=key)
 
     def notify_one(self):
         row = self.queue.take_notification()
@@ -132,7 +136,8 @@ def main():
     queue = Queue(settings)
     if args.command == 'review':
         for job in queue.list('review'):
-            print(job['id'], job['theme'], settings.data_dir / 'work' / job['id'] / 'candidate.mp4')
+            artifact = 'candidate.mp4' if job['result_key'] else 'worker.log'
+            print(job['id'], job['theme'], settings.data_dir / 'work' / job['id'] / artifact)
         return
     if args.command in ('revise', 'approve', 'reject'):
         if not args.job_id:
@@ -144,6 +149,8 @@ def main():
                 Runner(queue, CosStorage(), WeChat()).revise(job)
                 return
             approved = args.command == 'approve'
+            if approved and not job['result_key']:
+                parser.error('recompose the existing generated video before approval')
             if not queue.transition(job['id'], 'review', 'ready' if approved else 'failed',
                                     key=job['result_key'] if approved else None):
                 parser.error('job is not awaiting review')

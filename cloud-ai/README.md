@@ -14,10 +14,10 @@ iPhone 活动里的「嘉宾可生成 AI 版」默认关闭。开启后，原二
 - API 读取 BOOTH360_WX_APP_ID、BOOTH360_WX_APP_SECRET 和 BOOTH360_AI_SESSION_SECRET。会话签名密钥至少 32 字节。
 - 两个进程都用 BOOTH360_COS_BUCKET、BOOTH360_COS_REGION、BOOTH360_COS_SECRET_ID、BOOTH360_COS_SECRET_KEY 访问同一个桶。临时凭据加 BOOTH360_COS_TOKEN。
 - 队列读取 ARK_API_KEY、TENCENT_TOKENHUB_API_KEY 及 BOOTH360_AI_SHANGHAI_GUIDE_KEY。运镜参考使用获授权的私有 COS 视频，队列按需签发临时链接。固定背景向右移动的原片可配对应参考及 BOOTH360_AI_GUIDE_DIRECTION=right。
-- 默认只开放上海滩。其他主题完成实测后，通过 BOOTH360_AI_THEMES=shanghai,elf,disco 开放。每场上限 20 条，同时待处理上限 6 条，可配置 BOOTH360_AI_EVENT_LIMIT 和 BOOTH360_AI_QUEUE_LIMIT。
+- 默认只开放上海滩。试点可用 BOOTH360_AI_THEMES=shanghai,elf,disco 提供三个主题，上海滩为首个验收主题。每场上限 20 条，同时待处理上限 6 条，可配置 BOOTH360_AI_EVENT_LIMIT 和 BOOTH360_AI_QUEUE_LIMIT。
 - 微信公众平台选用适合这个场景的一次性订阅模板。配置 BOOTH360_WX_TEMPLATE_ID，以及匹配该模板字段的 BOOTH360_WX_TEMPLATE_FIELDS JSON 字典。字段值支持 {theme}、{status}、{time}。把 API 域名加入 request 合法域名，并确认实际 COS 下载域名在 downloadFile 列表。联调按版本设 BOOTH360_WX_PROGRAM_STATE=developer 或 trial，正式环境用 formal。
 
-上海试点主机使用 systemd，程序目录为 /opt/booth360-ai-pilot/app，数据目录为 /var/lib/booth360-ai-pilot，配置文件为 /etc/booth360-ai-pilot/service.env。配置文件仅由主机管理员维护，服务名为 booth360-ai-pilot-api 和 booth360-ai-pilot-worker。该主机的 FFmpeg 使用 BOOTH360_AI_H264_ENCODER=libopenh264。
+上海试点主机使用 systemd，程序目录为 /opt/booth360-ai-pilot/app，数据目录为 /var/lib/booth360-ai-pilot，配置文件为 /etc/booth360-ai-pilot/service.env。配置文件仅由主机管理员维护，服务名为 booth360-ai-pilot-api 和 booth360-ai-pilot-worker。该主机用 BOOTH360_AI_FFMPEG 指向支持 libx264 的 FFmpeg，FFprobe 使用系统版本。
 
 ## 验片与交付
 

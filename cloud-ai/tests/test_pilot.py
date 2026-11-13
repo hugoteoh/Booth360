@@ -94,8 +94,7 @@ class PilotTest(unittest.TestCase):
                              headers=self.owner if headers is None else headers, timeout=10)
 
     def test_one_video_full_flow_and_reentry(self):
-        original = self.get('/original').json()['downloadUrl']
-        self.assertIn(self.source, original)
+        self.assertEqual(self.get('/original').status_code, 404)
         self.assertFalse(self.get().json()['enabled'])
         self.assertEqual(self.post('/jobs', {'themeId': 'shanghai', 'consent': True}).status_code, 403)
         self.gate(True)
@@ -107,10 +106,13 @@ class PilotTest(unittest.TestCase):
             created = [future.result().json()['job'] for future in requests_in]
         self.assertEqual(len({job['id'] for job in created}), 1)
         job = created[0]
+        original = self.get('/original').json()['downloadUrl']
+        self.assertIn(self.source, original)
         self.assertEqual(job['status'], 'queued')
         self.assertEqual(self.post('/jobs', {'themeId': 'elf', 'consent': True}).json()['job']['themeId'], 'shanghai')
         stranger = self.login('stranger')
         self.assertIsNone(self.get(headers=stranger).json()['job'])
+        self.assertEqual(self.get('/original', headers=stranger).status_code, 404)
         self.assertEqual(self.post('/jobs', {'themeId': 'elf', 'consent': True}, stranger).status_code, 409)
         self.assertEqual(self.get(headers={}).status_code, 401)
         self.assertEqual(self.post('/subscription', {'templateId': 'different'}).status_code, 422)
